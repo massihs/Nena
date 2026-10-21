@@ -9,6 +9,8 @@ import { verifyPayment } from '../services/payment.js';
 
 const router = Router();
 
+router.get('/health', (_req, res) => res.json({ ok: true }));
+
 router.get('/config', (_req, res) => {
   const s = getSettings();
   res.json({

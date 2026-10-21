@@ -5,7 +5,8 @@ const production = env.NODE_ENV === 'production';
 export const config = {
   port,
   production,
-  publicUrl: env.PUBLIC_URL || `http://localhost:${port}`,
+  publicUrl: env.PUBLIC_URL
+    || (env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`),
   jwtSecret: env.JWT_SECRET || 'nena-dev-secret-change-me',
   dbPath: env.DB_PATH || 'data/nena.db',
   uploadDir: env.UPLOAD_DIR || 'data/uploads',
@@ -20,7 +21,8 @@ export const config = {
     kavenegarKey: env.KAVENEGAR_API_KEY || '',
     kavenegarTemplate: env.KAVENEGAR_TEMPLATE || 'nena-otp',
   },
-  exposeOtp: !production && env.EXPOSE_OTP !== '0',
+  // EXPOSE_OTP=1 shows login codes on screen even in production (demo deployments without an SMS provider).
+  exposeOtp: env.EXPOSE_OTP === '1' || (!production && env.EXPOSE_OTP !== '0'),
 
   // Payment gateway: "mock" (built-in test page) or "zarinpal".
   payment: {
@@ -48,4 +50,7 @@ export const config = {
 
 if (production && config.jwtSecret === 'nena-dev-secret-change-me') {
   throw new Error('JWT_SECRET must be set in production');
+}
+if (production && config.exposeOtp) {
+  console.warn('[nena] EXPOSE_OTP=1: login codes are shown to users. Use only for demos.');
 }

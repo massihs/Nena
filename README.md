@@ -70,6 +70,14 @@ test/                 تست‌های سرتاسری جریان سفر
 - HTTPS الزامی است (موقعیت مکانی مرورگر و نصب PWA فقط روی HTTPS کار می‌کنند)
 - اجرا با Docker: `docker build -t nena . && docker run -p 3000:3000 -v nena-data:/app/data --env-file .env nena`
 
+### استقرار روی Railway
+پروژه شامل `railway.json` است (ساخت با Dockerfile، بررسی سلامت روی `/api/health`، یک نمونه).
+1. در Railway: **New Project → Deploy from GitHub repo** و انتخاب این مخزن/شاخه
+2. **Volume** با مسیر `/data` به سرویس اضافه کنید (پایگاه داده و مدارک رانندگان)
+3. متغیرها: `JWT_SECRET` (رشته تصادفی بلند)، `DB_PATH=/data/nena.db`، `UPLOAD_DIR=/data/uploads`، `ADMIN_PHONES=09...`
+   و برای نسخه نمایشی بدون سرویس پیامک: `EXPOSE_OTP=1` (کد ورود روی صفحه نمایش داده می‌شود)
+4. **Settings → Networking → Generate Domain**. آدرس عمومی به‌صورت خودکار از `RAILWAY_PUBLIC_DOMAIN` خوانده می‌شود.
+
 ### محدودیت‌های فعلی
 - تماس مستقیم با شماره واقعی انجام می‌شود (ماسک کردن شماره نیاز به سرویس تلفنی دارد)
 - مسیر راننده تا مبدأ و زمان رسیدن تخمینی است؛ کرایه پیش از سفر قطعی است (به‌علاوه هزینه توقف)
