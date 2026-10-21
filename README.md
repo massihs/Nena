@@ -70,6 +70,12 @@ test/                 تست‌های سرتاسری جریان سفر
 - HTTPS الزامی است (موقعیت مکانی مرورگر و نصب PWA فقط روی HTTPS کار می‌کنند)
 - اجرا با Docker: `docker build -t nena . && docker run -p 3000:3000 -v nena-data:/app/data --env-file .env nena`
 
+### استقرار رایگان روی Render
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/massihs/Nena)
+
+فایل `render.yaml` سرویس را با پلن رایگان می‌سازد (`JWT_SECRET` خودکار، `EXPOSE_OTP=1` برای ورود بدون پیامک). هنگام ساخت، شماره مدیر را در `ADMIN_PHONES` وارد کنید.
+در پلن رایگان سرویس پس از ۱۵ دقیقه بی‌استفاده به خواب می‌رود و دیسک ماندگار ندارد؛ داده‌ها با هر راه‌اندازی مجدد پاک می‌شوند (مناسب نسخه نمایشی).
+
 ### استقرار روی Railway
 پروژه شامل `railway.json` است (ساخت با Dockerfile، بررسی سلامت روی `/api/health`، یک نمونه).
 1. در Railway: **New Project → Deploy from GitHub repo** و انتخاب این مخزن/شاخه

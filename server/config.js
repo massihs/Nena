@@ -6,6 +6,7 @@ export const config = {
   port,
   production,
   publicUrl: env.PUBLIC_URL
+    || env.RENDER_EXTERNAL_URL
     || (env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`),
   jwtSecret: env.JWT_SECRET || 'nena-dev-secret-change-me',
   dbPath: env.DB_PATH || 'data/nena.db',
