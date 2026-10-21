@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>نِنا — موقعیت زنده سفر</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/shared/style.css">
+  <script src="/vendor/leaflet/leaflet.js"></script>
+</head>
+<body>
+  <div class="app">
+    <div id="map" class="map"></div>
+    <div class="topbar"><div class="brand brand-pill">نِنا</div></div>
+    <section class="sheet" id="sheet"><div class="empty"><span class="spinner"></span></div></section>
+  </div>
+  <script type="module">
+    import { h, mount, ratingPill, plateEl, avatar } from '/shared/ui.js';
+    import { createMap, carIcon, pinIcon, routeLayer, animateTo, setHeading, fitTo } from '/shared/map.js';
+    import * as fa from '/shared/fa.js';
+    const L = window.L;
+    const token = location.pathname.split('/').pop();
+    const sheet = document.getElementById('sheet');
+    const cfg = await (await fetch('/api/config')).json();
+    const map = createMap(document.getElementById('map'), cfg);
+    let car, drawn = false;
+    async function refresh() {
+      const res = await fetch(`/api/track/${encodeURIComponent(token)}`);
+      const data = await res.json();
+      if (!res.ok) return mount(sheet, h('div', { class: 'empty' }, h('h3', {}, data.error || 'سفر یافت نشد')));
+      const r = data.ride;
+      if (!drawn) {
+        routeLayer(r.route).addTo(map);
+        L.marker(r.pickup, { icon: pinIcon('o', 'مبدأ') }).addTo(map);
+        L.marker(r.dropoff, { icon: pinIcon('d', 'مقصد') }).addTo(map);
+        fitTo(map, [r.pickup, r.dropoff, r.driver], sheet);
+        drawn = true;
+      }
+      if (r.driver?.lat != null) {
+        if (!car) car = L.marker([r.driver.lat, r.driver.lng], { icon: carIcon('eco', r.driver.heading), zIndexOffset: 1000 }).addTo(map);
+        else { animateTo(car, r.driver); setHeading(car, r.driver.heading); }
+      }
+      const eta = r.started_at ? fa.jTime(r.started_at + r.duration_min * 60000) : null;
+      mount(sheet,
+        h('div', { class: 'muted small' }, 'موقعیت زنده سفر با نِنا'),
+        h('div', { class: 'status-line' }, fa.STATUS_FA[r.status] || r.status),
+        eta && r.status === 'in_progress' ? h('div', { class: 'muted small' }, `زمان تقریبی رسیدن: ${eta}`) : null,
+        r.driver ? h('div', { class: 'driver-card mt' }, avatar(r.driver.name), h('div', { class: 'grow' }, h('div', { class: 'bold' }, r.driver.name), ratingPill(r.driver.rating)),
+          h('div', { class: 'col gap-sm', style: { alignItems: 'flex-end' } }, plateEl(r.driver.plate), h('div', { class: 'small muted' }, `${r.driver.vehicle_model} ${r.driver.vehicle_color}`))) : null,
+        h('div', { class: 'list mt' },
+          h('div', { class: 'list-item' }, h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, r.pickup.address || 'مبدأ'), h('div', { class: 'li-sub' }, 'مبدأ'))),
+          h('div', { class: 'list-item' }, h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, r.dropoff.address || 'مقصد'), h('div', { class: 'li-sub' }, 'مقصد')))),
+        h('a', { class: 'btn btn-danger btn-block mt', href: 'tel:110' }, 'تماس با پلیس ۱۱۰'));
+      if (['completed', 'cancelled'].includes(r.status)) return;
+      setTimeout(refresh, 4000);
+    }
+    refresh();
+  </script>
+</body>
+</html>

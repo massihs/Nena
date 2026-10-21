@@ -1,0 +1,39 @@
+.go-btn {
+  width: 96px; height: 96px; border-radius: 50%; border: 0; cursor: pointer; margin: 0 auto; display: grid; place-items: center;
+  background: var(--blue); color: #fff; font-size: 24px; font-weight: 900; box-shadow: 0 0 0 8px rgba(39,110,241,.25);
+  transition: transform .1s;
+}
+.go-btn:active { transform: scale(.95); }
+.go-btn.stop { background: var(--danger); box-shadow: 0 0 0 8px rgba(225,25,0,.25); font-size: 15px; }
+.earn-pill { background: var(--card); color: var(--fg); padding: 6px 16px; border-radius: 99px; box-shadow: var(--shadow); font-weight: 800; border: 0; cursor: pointer; }
+.earn-pill small { display: block; font-size: 10px; font-weight: 600; color: var(--muted); line-height: 1; }
+.online-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.online-dot.on { background: var(--accent); box-shadow: 0 0 0 4px rgba(31,210,124,.25); }
+
+.offer { position: fixed; inset: 0; z-index: 1500; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center; animation: fade .15s; }
+@media (min-width: 600px) { .offer { align-items: center; } }
+.offer-card { background: var(--card); width: 100%; max-width: 460px; border-radius: 24px 24px 0 0; padding: 22px; animation: up .25s ease; }
+@media (min-width: 600px) { .offer-card { border-radius: 24px; } }
+.ring { position: relative; width: 74px; height: 74px; flex: none; }
+.ring svg { transform: rotate(-90deg); }
+.ring .ring-text { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 900; font-size: 22px; }
+.offer-fare { font-size: 32px; font-weight: 900; line-height: 1.2; }
+.accept-btn { min-height: 64px; font-size: 20px; }
+
+.wait-timer { font-size: 34px; font-weight: 900; direction: ltr; text-align: center; }
+.wait-timer.charging { color: var(--warn); }
+.pin-inputs { display: flex; gap: 10px; justify-content: center; direction: ltr; }
+.pin-inputs input { width: 56px; height: 64px; text-align: center; font-size: 28px; font-weight: 900; border-radius: 12px; border: 2px solid var(--line); background: var(--soft); }
+.pin-inputs input:focus { border-color: var(--fg); outline: none; }
+
+.reg-steps { display: flex; gap: 6px; margin-bottom: 16px; }
+.reg-steps i { flex: 1; height: 4px; border-radius: 4px; background: var(--soft-2); }
+.reg-steps i.on { background: var(--accent); }
+.vehicle-pick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.vehicle-pick button { border: 2px solid var(--line); background: var(--soft); border-radius: 14px; padding: 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; font-weight: 700; }
+.vehicle-pick button.selected { border-color: var(--accent); }
+.vehicle-pick svg { width: 64px; height: 40px; }
+.plate-input { display: flex; direction: ltr; gap: 6px; align-items: center; }
+.plate-input input, .plate-input select { text-align: center; padding: 8px 4px; }
+.doc-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.doc-row:last-child { border-bottom: 0; }
