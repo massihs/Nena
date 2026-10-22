@@ -216,6 +216,21 @@ CREATE TABLE IF NOT EXISTS places (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS places_name_cat ON places(name, category);
 
+CREATE TABLE IF NOT EXISTS surge_zones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  radius_km REAL NOT NULL,
+  multiplier REAL NOT NULL,
+  ride_types TEXT NOT NULL DEFAULT '[]',
+  days TEXT NOT NULL DEFAULT '[]',
+  start_minute INTEGER,
+  end_minute INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -256,6 +271,11 @@ const RIDE_TYPES = [
 export const DEFAULT_SETTINGS = {
   surge_enabled: true,
   surge_max: 2,
+  // Dynamic surge: +sensitivity per extra open request per idle driver, measured within surge_radius_km.
+  surge_sensitivity: 0.2,
+  surge_radius_km: 3,
+  // Hard ceiling for any multiplier, including manual zones.
+  surge_zone_max: 3,
   cancel_fee: 20000,
   free_cancel_seconds: 120,
   free_wait_minutes: 3,

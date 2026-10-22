@@ -137,7 +137,7 @@ export async function quote({ pickup, dropoff, stops = [] }) {
   if (haversineKm(p, d) < 0.1 && !st.length) throw new HttpError(400, 'مبدأ و مقصد خیلی به هم نزدیک هستند');
   if (haversineKm(p, d) > 150) throw new HttpError(400, 'سفرهای بیش از ۱۵۰ کیلومتر پشتیبانی نمی‌شوند');
   const route = await getRoute([p, ...st, d]);
-  return { pickup: p, dropoff: d, stops: st, route, surge: surgeAt(p.lat, p.lng) };
+  return { pickup: p, dropoff: d, stops: st, route };
 }
 
 export async function createRide(rider, body) {
@@ -162,8 +162,8 @@ export async function createRide(rider, body) {
   }
 
   const q = await quote(body);
-  // Scheduled rides are priced without surge since demand at pickup time is unknown.
-  const surge = scheduledAt ? 1 : q.surge;
+  // Scheduled rides only get manual zone pricing for their pickup time: live demand is unknown.
+  const surge = surgeAt(q.pickup.lat, q.pickup.lng, type.key, scheduledAt ? { at: scheduledAt, dynamic: false } : undefined);
   const fare = fareFor(type, q.route.distance_km, q.route.duration_min, surge);
   let promoCode = null, discount = 0;
   if (body.promo_code) {

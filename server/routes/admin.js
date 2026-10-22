@@ -12,6 +12,8 @@ import { getRide, rideView, cancelByRider, emitRideUpdate } from '../services/ri
 import { withdrawOffersFor } from '../services/matching.js';
 import { addTx } from '../services/wallet.js';
 import { listPlaces, savePlace, deletePlace } from '../services/placeStore.js';
+import { economics } from '../services/economics.js';
+import { surgeDetail } from '../services/pricing.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -156,6 +158,86 @@ router.put('/ride-types/:key', (req, res) => {
     commission, b.active === undefined ? t.active : (b.active ? 1 : 0), t.key,
   );
   res.json({ ride_type: db.prepare('SELECT * FROM ride_types WHERE key = ?').get(t.key) });
+});
+
+router.get('/economics', (req, res) => {
+  const days = [1, 7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+  res.json(economics(days));
+});
+
+// --- surge pricing -----------------------------------------------------------
+
+const zoneView = (z) => ({ ...z, ride_types: parseJson(z.ride_types, []), days: parseJson(z.days, []), active: !!z.active });
+
+function zoneInput(b) {
+  const name = String(b.name || '').trim().slice(0, 60);
+  if (!name) throw new HttpError(400, 'نام محدوده را وارد کنید');
+  const lat = Number(b.lat), lng = Number(b.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new HttpError(400, 'مرکز محدوده را روی نقشه مشخص کنید');
+  const radius = Number(b.radius_km);
+  if (!(radius >= 0.3 && radius <= 30)) throw new HttpError(400, 'شعاع باید بین ۰٫۳ تا ۳۰ کیلومتر باشد');
+  const multiplier = Math.round(Number(b.multiplier) * 10) / 10;
+  if (!(multiplier >= 1.1 && multiplier <= 5)) throw new HttpError(400, 'ضریب باید بین ۱٫۱ تا ۵ باشد');
+  const types = (Array.isArray(b.ride_types) ? b.ride_types : []).filter((k) => db.prepare('SELECT 1 FROM ride_types WHERE key = ?').get(k));
+  const days = (Array.isArray(b.days) ? b.days : []).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+  const minute = (v) => (v === '' || v == null ? null : Number(v));
+  const start = minute(b.start_minute), end = minute(b.end_minute);
+  for (const m of [start, end]) if (m != null && !(Number.isInteger(m) && m >= 0 && m < 1440)) throw new HttpError(400, 'بازه زمانی نامعتبر است');
+  if ((start == null) !== (end == null) || (start != null && start === end)) throw new HttpError(400, 'ساعت شروع و پایان را کامل وارد کنید');
+  return [name, lat, lng, radius, multiplier, JSON.stringify(types), JSON.stringify([...new Set(days)]), start, end, b.active === false ? 0 : 1];
+}
+
+router.get('/surge/zones', (_req, res) => {
+  res.json({ zones: db.prepare('SELECT * FROM surge_zones ORDER BY active DESC, id DESC').all().map(zoneView) });
+});
+router.post('/surge/zones', (req, res) => {
+  const { lastInsertRowid } = db.prepare(`INSERT INTO surge_zones (name, lat, lng, radius_km, multiplier, ride_types, days, start_minute, end_minute, active, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...zoneInput(req.body || {}), now());
+  res.status(201).json({ zone: zoneView(db.prepare('SELECT * FROM surge_zones WHERE id = ?').get(lastInsertRowid)) });
+});
+router.put('/surge/zones/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT 1 FROM surge_zones WHERE id = ?').get(id)) throw new HttpError(404, 'محدوده یافت نشد');
+  db.prepare(`UPDATE surge_zones SET name = ?, lat = ?, lng = ?, radius_km = ?, multiplier = ?, ride_types = ?, days = ?,
+    start_minute = ?, end_minute = ?, active = ? WHERE id = ?`).run(...zoneInput(req.body || {}), id);
+  res.json({ zone: zoneView(db.prepare('SELECT * FROM surge_zones WHERE id = ?').get(id)) });
+});
+router.delete('/surge/zones/:id', (req, res) => {
+  db.prepare('DELETE FROM surge_zones WHERE id = ?').run(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+// Current multiplier at one point, per active service, with its breakdown.
+router.get('/surge/preview', (req, res) => {
+  const lat = Number(req.query.lat), lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new HttpError(400, 'موقعیت نامعتبر است');
+  const services = getRideTypes().map((t) => ({ key: t.key, name: t.name, ...surgeDetail(lat, lng, t.key) }));
+  res.json({ services });
+});
+
+// Live surge over a grid covering the area with drivers or requests (default: the configured city).
+router.get('/surge/map', (req, res) => {
+  const type = String(req.query.type || 'eco');
+  const pts = db.prepare(`SELECT lat, lng FROM drivers WHERE online = 1 AND lat IS NOT NULL
+    UNION ALL SELECT pickup_lat, pickup_lng FROM rides WHERE created_at > ?`).all(now() - 3600 * 1000);
+  const [cLat, cLng] = config.map.center;
+  const lats = pts.map((p) => p.lat).concat(cLat - 0.12, cLat + 0.12);
+  const lngs = pts.map((p) => p.lng).concat(cLng - 0.16, cLng + 0.16);
+  const [minLat, maxLat, minLng, maxLng] = [Math.min(...lats), Math.max(...lats), Math.min(...lngs), Math.max(...lngs)];
+  const N = 14;
+  const dLat = (maxLat - minLat) / N, dLng = (maxLng - minLng) / N;
+  const cells = [];
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const lat = minLat + (i + 0.5) * dLat, lng = minLng + (j + 0.5) * dLng;
+      const d = surgeDetail(lat, lng, type);
+      if (d.multiplier > 1 || d.demand || d.supply) {
+        cells.push({ south: lat - dLat / 2, west: lng - dLng / 2, north: lat + dLat / 2, east: lng + dLng / 2, multiplier: d.multiplier, dynamic: d.dynamic, demand: d.demand, supply: d.supply, zone: d.zone?.name || null });
+      }
+    }
+  }
+  const s = getSettings();
+  res.json({ cells, max: s.surge_zone_max, enabled: s.surge_enabled });
 });
 
 router.get('/places', (req, res) => {

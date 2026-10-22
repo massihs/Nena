@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, getSettings } from '../db.js';
 import { HttpError, ah, int, parseLatLng } from '../util.js';
 import { requireAuth } from '../auth.js';
-import { getRideTypes, fareFor, checkPromo, promoDiscount } from '../services/pricing.js';
+import { getRideTypes, fareFor, checkPromo, promoDiscount, surgeAt } from '../services/pricing.js';
 import { findAvailableDrivers, ALL_VEHICLES } from '../services/drivers.js';
 import {
   quote, createRide, getRide, rideView, activeRideFor, cancelByRider, rateRide, tipRide, changeDestination, emitRideUpdate,
@@ -39,18 +39,19 @@ router.post('/estimate', ah(async (req, res) => {
     try { promo = checkPromo(req.body.promo_code, req.user.id, null); } catch (e) { promoError = e.message; }
   }
   const options = getRideTypes().map((t) => {
-    const fare = fareFor(t, q.route.distance_km, q.route.duration_min, q.surge);
+    const surge = surgeAt(q.pickup.lat, q.pickup.lng, t.key);
+    const fare = fareFor(t, q.route.distance_km, q.route.duration_min, surge);
     const [nearest] = findAvailableDrivers(q.pickup.lat, q.pickup.lng, radius, t.vehicle_types.split(','), []);
     let discount = 0;
     if (promo && fare >= promo.min_fare) discount = promoDiscount(promo, fare);
     return {
       type: t.key, name: t.name, description: t.description, icon: t.icon, seats: t.seats, is_delivery: !!t.is_delivery,
-      fare, discount, payable: fare - discount, eta_min: nearest?.eta_min ?? null,
+      fare, discount, payable: fare - discount, eta_min: nearest?.eta_min ?? null, surge,
     };
   });
   res.json({
     distance_km: q.route.distance_km, duration_min: q.route.duration_min, route: q.route.geometry,
-    surge: q.surge, options, promo_error: promoError,
+    surge: Math.max(1, ...options.map((o) => o.surge)), options, promo_error: promoError,
   });
 }));
 

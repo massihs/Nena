@@ -4,20 +4,25 @@ import { createMap, carIcon, pinIcon } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
 import * as fa from '/shared/fa.js';
 import { categoryLabel } from '/shared/places.js';
+import { economicsPage } from './economics.js';
+import { surgePage } from './surge.js';
 
 const L = window.L;
 const api = createApi('admin');
 const root = document.getElementById('root');
 const S = { cfg: null, section: 'dashboard', main: null, nav: null, stats: null, liveTimer: null };
+const ctx = { api, S };
 
 const SECTIONS = [
-  ['dashboard', 'داشبورد', 'chart'],
+  ['dashboard', 'داشبورد زنده', 'chart'],
+  ['economics', 'اقتصاد و درآمد', 'money'],
+  ['surge', 'افزایش قیمت', 'fire'],
   ['drivers', 'رانندگان', 'car'],
   ['users', 'کاربران', 'users'],
   ['rides', 'سفرها', 'history'],
-  ['pricing', 'تعرفه‌ها', 'money'],
+  ['pricing', 'سرویس‌ها و تعرفه‌ها', 'tag'],
   ['places', 'مکان‌ها و آدرس‌ها', 'pin'],
-  ['promos', 'کدهای تخفیف', 'tag'],
+  ['promos', 'کدهای تخفیف', 'gift'],
   ['sos', 'هشدارهای ایمنی', 'sos'],
   ['payouts', 'تسویه رانندگان', 'wallet'],
   ['settings', 'تنظیمات', 'settings'],
@@ -75,7 +80,11 @@ function go(section) {
   S.section = section;
   clearInterval(S.liveTimer);
   drawNav();
-  ({ dashboard, drivers, users, rides, pricing, places, promos, sos, payouts, settings })[section]().catch(toastError);
+  const pages = {
+    dashboard, drivers, users, rides, pricing, places, promos, sos, payouts, settings,
+    economics: () => economicsPage(ctx), surge: () => surgePage(ctx),
+  };
+  pages[section]().catch(toastError);
 }
 
 const table = (headers, rows) => h('div', { class: 'table-wrap' }, h('table', {},
@@ -316,19 +325,45 @@ async function rideDetail(id) {
 async function pricing() {
   const { ride_types: types } = await api.get('/admin/ride-types');
   const fields = [['base_fare', 'ورودی'], ['per_km', 'هر کیلومتر'], ['per_min', 'هر دقیقه'], ['min_fare', 'حداقل کرایه'], ['wait_per_min', 'توقف/دقیقه'], ['commission_pct', 'کمیسیون ٪']];
+  // Same formula as the server (pricing.fareFor), for the live example.
+  const fareOf = (v, km, min) => Math.ceil(Math.max(v.min_fare, v.base_fare + v.per_km * km + v.per_min * min) / 1000) * 1000;
   mount(S.main,
-    h('h1', {}, 'تعرفه‌ها'),
-    h('p', { class: 'muted' }, 'همه مبالغ به تومان است. کرایه = max(حداقل، ورودی + مسافت × نرخ کیلومتر + زمان × نرخ دقیقه) × ضریب تقاضا، گرد به هزار تومان.'),
-    table(['سرویس', ...fields.map((f) => f[1]), 'فعال', ''], types.map((t) => {
-      const inputs = Object.fromEntries(fields.map(([k]) => [k, h('input', { class: 'input num-input', value: t[k] })]));
+    h('h1', {}, 'سرویس‌ها و تعرفه‌ها'),
+    h('p', { class: 'muted' }, 'همه مبالغ به تومان است. کرایه = max(حداقل، ورودی + مسافت × نرخ کیلومتر + زمان × نرخ دقیقه) × ضریب تقاضا، گرد به هزار تومان. سرویس غیرفعال در اپ مسافر و ثبت‌نام راننده نمایش داده نمی‌شود.'),
+    h('div', { class: 'grid-cards' }, types.map((t) => {
+      const v = { ...t };
+      const sample = h('div', { class: 'small' });
+      const drawSample = () => {
+        const short = fareOf(v, 5, 15), long = fareOf(v, 15, 40);
+        const cut = (f) => Math.round((f * v.commission_pct) / 100);
+        mount(sample,
+          h('div', { class: 'kv' }, h('span', { class: 'muted' }, 'سفر ۵ کیلومتر / ۱۵ دقیقه'), h('span', { class: 'bold' }, fa.toman(short))),
+          h('div', { class: 'kv' }, h('span', { class: 'muted' }, 'سفر ۱۵ کیلومتر / ۴۰ دقیقه'), h('span', { class: 'bold' }, fa.toman(long))),
+          h('div', { class: 'kv' }, h('span', { class: 'muted' }, 'سهم نِنا / راننده (سفر کوتاه)'), h('span', {}, `${fa.toman(cut(short))} / ${fa.toman(short - cut(short))}`)));
+      };
+      const inputs = Object.fromEntries(fields.map(([k]) => [k, h('input', {
+        class: 'input num-input', value: t[k],
+        oninput: (e) => { v[k] = Number(fa.enDigits(e.target.value)) || 0; drawSample(); },
+      })]));
+      const name = h('input', { class: 'input', value: t.name });
+      const desc = h('input', { class: 'input', value: t.description || '' });
       const active = h('input', { type: 'checkbox', checked: !!t.active });
-      const save = h('button', { class: 'btn btn-sm btn-primary' }, 'ذخیره');
+      const save = h('button', { class: 'btn btn-primary btn-block mt' }, 'ذخیره');
       save.onclick = () => busy(save, async () => {
         const body = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, fa.enDigits(el.value)]));
-        await api.put(`/admin/ride-types/${t.key}`, { ...body, active: active.checked });
-        toast(`تعرفه ${t.name} ذخیره شد`, 'success');
+        await api.put(`/admin/ride-types/${t.key}`, { ...body, name: name.value, description: desc.value, active: active.checked });
+        toast(`تعرفه ${name.value} ذخیره شد`, 'success');
       });
-      return h('tr', {}, h('td', { class: 'bold' }, t.name), ...fields.map(([k]) => h('td', {}, inputs[k])), h('td', {}, active), h('td', {}, save));
+      drawSample();
+      return h('div', { class: 'card', style: { opacity: t.active ? 1 : 0.75 } },
+        h('div', { class: 'row between' }, h('h3', { style: { margin: 0 } }, t.name),
+          h('label', { class: 'row gap-sm small' }, h('label', { class: 'switch' }, active, h('span')), 'فعال')),
+        h('div', { class: 'row mt' }, h('div', { class: 'field grow' }, h('label', {}, 'نام نمایشی'), name)),
+        h('div', { class: 'field' }, h('label', {}, 'توضیح کوتاه'), desc),
+        h('div', { class: 'grid-cards', style: { gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' } },
+          fields.map(([k, l]) => h('div', { class: 'field', style: { marginBottom: 0 } }, h('label', {}, l), inputs[k]))),
+        h('div', { class: 'card mt', style: { background: 'var(--soft)', boxShadow: 'none' } }, h('div', { class: 'small bold mb' }, 'نمونه کرایه (بدون ضریب)'), sample),
+        save);
     })));
 }
 
@@ -451,25 +486,40 @@ async function payouts() {
       h('td', {}, p.status === 'pending' ? [h('button', { class: 'btn btn-sm btn-accent', onclick: act(p, 'paid') }, 'واریز شد'), ' ', h('button', { class: 'btn btn-sm btn-danger-soft', onclick: act(p, 'rejected') }, 'رد')] : null)))));
 }
 
+// Operating rules grouped by theme. Surge settings live on the surge page.
+const SETTING_GROUPS = [
+  ['لغو و انتظار', [
+    ['cancel_fee', 'هزینه لغو', 'تومان؛ پس از مهلت رایگان یا رسیدن راننده از مسافر دریافت و به راننده داده می‌شود'],
+    ['free_cancel_seconds', 'مهلت لغو رایگان پس از پذیرش', 'ثانیه'],
+    ['free_wait_minutes', 'انتظار رایگان در مبدأ', 'دقیقه؛ پس از آن هزینه توقف هر سرویس محاسبه می‌شود'],
+    ['no_show_wait_minutes', 'انتظار لازم برای «مسافر نیامد»', 'دقیقه'],
+  ]],
+  ['تخصیص سفر', [
+    ['offer_timeout_seconds', 'مهلت پاسخ راننده', 'ثانیه؛ پس از آن درخواست به راننده بعدی می‌رود'],
+    ['search_radius_km', 'شعاع جستجوی راننده', 'کیلومتر'],
+    ['max_search_seconds', 'حداکثر زمان جستجو', 'ثانیه؛ پس از آن «راننده‌ای یافت نشد»'],
+  ]],
+  ['ایمنی', [
+    ['require_pin', 'الزام کد ۴ رقمی برای شروع سفر', 'راننده فقط با کد مسافر سفر را شروع می‌کند'],
+    ['support_phone', 'شماره پشتیبانی', 'در اپ مسافر و راننده نمایش داده می‌شود'],
+  ]],
+  ['مالی و بازاریابی', [
+    ['referral_bonus', 'هدیه دعوت از دوستان', 'تومان برای هر دو نفر پس از اولین سفر'],
+    ['min_payout', 'حداقل مبلغ تسویه رانندگان', 'تومان'],
+  ]],
+];
+
 async function settings() {
   const { settings: s } = await api.get('/admin/settings');
-  const LABELS = {
-    surge_enabled: 'قیمت‌گذاری پویا (ضریب تقاضا)', surge_max: 'حداکثر ضریب تقاضا', cancel_fee: 'هزینه لغو (تومان)',
-    free_cancel_seconds: 'مهلت لغو رایگان پس از پذیرش (ثانیه)', free_wait_minutes: 'انتظار رایگان در مبدأ (دقیقه)',
-    no_show_wait_minutes: 'انتظار لازم برای «مسافر نیامد» (دقیقه)', offer_timeout_seconds: 'مهلت پاسخ راننده به درخواست (ثانیه)',
-    search_radius_km: 'شعاع جستجوی راننده (کیلومتر)', max_search_seconds: 'حداکثر زمان جستجو (ثانیه)',
-    require_pin: 'الزام کد ۴ رقمی برای شروع سفر', referral_bonus: 'هدیه دعوت (تومان)', min_payout: 'حداقل مبلغ تسویه (تومان)',
-    support_phone: 'شماره پشتیبانی',
-  };
   const inputs = {};
-  const rows = Object.entries(LABELS).map(([k, label]) => {
+  const control = (k) => {
     const v = s[k];
     const el = typeof v === 'boolean'
       ? h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: v }), h('span'))
       : h('input', { class: 'input num-input', style: { width: '160px' }, value: v });
     inputs[k] = el;
-    return h('div', { class: 'row between', style: { padding: '10px 0', borderBottom: '1px solid var(--line)' } }, h('span', { class: 'bold' }, label), el);
-  });
+    return el;
+  };
   const save = h('button', { class: 'btn btn-primary btn-lg mt' }, 'ذخیره تنظیمات');
   save.onclick = () => busy(save, async () => {
     const body = {};
@@ -477,7 +527,13 @@ async function settings() {
     await api.put('/admin/settings', body);
     toast('تنظیمات ذخیره شد', 'success');
   });
-  mount(S.main, h('h1', {}, 'تنظیمات'), h('div', { class: 'card', style: { maxWidth: '720px' } }, rows, save));
+  mount(S.main,
+    h('h1', {}, 'تنظیمات'),
+    h('p', { class: 'muted small' }, 'کمیسیون و کرایه هر سرویس در «سرویس‌ها و تعرفه‌ها» و ضرایب در «افزایش قیمت» تنظیم می‌شوند.'),
+    h('div', { class: 'grid-cards' }, SETTING_GROUPS.map(([title, rows]) => h('div', { class: 'card' },
+      h('h3', {}, title),
+      rows.map(([k, label, hint]) => h('div', { class: 'setting-row' }, h('div', {}, h('div', { class: 'bold' }, label), h('span', { class: 'hint' }, hint)), control(k)))))),
+    save);
 }
 
 boot().catch(toastError);
