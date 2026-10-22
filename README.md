@@ -77,7 +77,7 @@ test/                 تست‌های سرتاسری جریان سفر
 - `NODE_ENV=production` و `JWT_SECRET` تصادفی (در این حالت کد پیامک به کاربر نشان داده نمی‌شود)
 - **پیامک:** `SMS_PROVIDER=kavenegar` با کلید و قالب Verify در کاوه‌نگار (`token` = کد)
 - **پرداخت:** `PAYMENT_PROVIDER=zarinpal` با مرچنت زرین‌پال؛ `PUBLIC_URL` باید آدرس عمومی HTTPS باشد
-- **نقشه:** برای جستجو و مسیریابی دقیق‌تر در ایران `GEOCODER=neshan` و `ROUTING_PROVIDER=neshan` با کلید API نشان. کاشی‌های نقشه از `TILE_URL` خوانده می‌شود.
+- **نقشه:** برای جستجو و مسیریابی دقیق‌تر در ایران `GEOCODER=neshan` و `ROUTING_PROVIDER=neshan` با کلید API نشان. نقشه پایه برداری و سیاه‌وسفید است (OpenFreeMap، رایگان و بدون کلید، رندر WebGL با MapLibre؛ برچسب‌ها فارسی). با `MAP_STYLE_URL` قابل تغییر است و در نبود WebGL به کاشی‌های `TILE_URL` برمی‌گردد.
 - HTTPS الزامی است (موقعیت مکانی مرورگر و نصب PWA فقط روی HTTPS کار می‌کنند)
 - اجرا با Docker: `docker build -t nena . && docker run -p 3000:3000 -v nena-data:/app/data --env-file .env nena`
 

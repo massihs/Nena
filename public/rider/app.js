@@ -3,7 +3,7 @@ import {
   h, mount, icon, toast, toastError, modal, confirmDialog, busy, ratingPill, starInput, plateEl, avatar, listItem,
   trackSheetHeight, debounce, shareLink, vehicleArt, notify,
 } from '/shared/ui.js';
-import { createMap, carIcon, setHeading, pinIcon, meIcon, animateTo, routeLayer, fitTo, getPosition } from '/shared/map.js';
+import { createMap, carIcon, setHeading, pinIcon, meIcon, animateTo, routeLayer, fitTo, getPosition, moveTo } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
 import { placeResult } from '/shared/places.js';
 import * as fa from '/shared/fa.js';
@@ -139,7 +139,7 @@ async function locate(initial = false, recenter = false) {
     if (layers.me) layers.me.setLatLng(pos);
     else layers.me = L.marker(pos, { icon: meIcon(), interactive: false, zIndexOffset: -10 }).addTo(S.map);
   }
-  if (S.me && (initial || recenter) && ['home', 'search', null].includes(S.view)) S.map.setView(S.me, 16);
+  if (S.me && (initial || recenter) && ['home', 'search', null].includes(S.view)) moveTo(S.map, S.me, 16);
   if (S.me && !S.pickup && !S.me.approximate) {
     S.pickup = { lat: S.me.lat, lng: S.me.lng, address: 'موقعیت فعلی', current: true };
     reverse(S.me).then((addr) => { if (S.pickup?.current && addr) S.pickup.address = addr; });
@@ -397,7 +397,7 @@ function showPickOnMap(field) {
   setCenterPin(true);
   const current = field.key === 'stop' ? S.stops[field.i] : S[field.key];
   const start = current || S.me;
-  if (start) S.map.setView(start, 17);
+  if (start) moveTo(S.map, start, 17);
 
   const addr = h('div', { class: 'bold ellipsis' }, '...');
   const what = field.key === 'pickup' ? 'مبدأ' : field.key === 'dropoff' ? 'مقصد' : 'توقف';
@@ -620,7 +620,7 @@ function showSearching() {
   S.view = 'searching';
   setCenterPin(false);
   drawTrip(r);
-  S.map.setView(r.pickup, 16);
+  moveTo(S.map, r.pickup, 16);
   mount(sheet,
     h('div', { class: 'searching-anim' }, h('span'), h('span'), h('span'), h('i')),
     h('h3', { class: 'center' }, 'در حال یافتن نزدیک‌ترین راننده'),

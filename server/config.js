@@ -42,7 +42,13 @@ export const config = {
   neshanKey: env.NESHAN_API_KEY || '',
 
   map: {
+    // Vector basemaps (OpenFreeMap, free, no key) rendered with WebGL: sharp on any screen.
+    styleUrl: env.MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/positron',
+    darkStyleUrl: env.MAP_STYLE_URL_DARK ?? 'https://tiles.openfreemap.org/styles/dark',
+    styleAttribution: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © OpenMapTiles © OpenStreetMap',
+    // Raster fallback when WebGL or the style is unavailable.
     tileUrl: env.TILE_URL || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: env.TILE_SUBDOMAINS || 'abc',
     attribution: env.TILE_ATTRIBUTION || '&copy; OpenStreetMap',
     center: [35.6997, 51.338], // Tehran, Azadi area
     zoom: 13,

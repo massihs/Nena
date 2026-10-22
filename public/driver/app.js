@@ -2,7 +2,7 @@ import { createApi } from '/shared/api.js';
 import {
   h, mount, icon, toast, toastError, modal, confirmDialog, busy, ratingPill, starInput, avatar, listItem, trackSheetHeight, beep, notify,
 } from '/shared/ui.js';
-import { createMap, carIcon, setHeading, pinIcon, animateTo, routeLayer, fitTo, bearing } from '/shared/map.js';
+import { createMap, carIcon, setHeading, pinIcon, animateTo, routeLayer, fitTo, bearing, moveTo } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
 import { openChat } from '/shared/chat.js';
 import { openSafety } from '/shared/safety.js';
@@ -102,7 +102,7 @@ function buildShell() {
   mount(root, h('div', { class: 'app' },
     h('div', { id: 'map', class: 'map' }),
     h('div', { class: 'topbar' }, menuBtn, h('div', { class: 'spacer' }), earn, h('div', { class: 'spacer' }), demandBtn),
-    h('div', { class: 'map-fabs' }, h('button', { class: 'btn btn-icon', 'aria-label': 'موقعیت من', onclick: () => S.pos && S.map.setView(S.pos, 16) }, icon('locate'))),
+    h('div', { class: 'map-fabs' }, h('button', { class: 'btn btn-icon', 'aria-label': 'موقعیت من', onclick: () => S.pos && moveTo(S.map, S.pos, 16) }, icon('locate'))),
     sheet));
   trackSheetHeight(sheet);
   S.map = createMap(document.getElementById('map'), S.cfg);
@@ -259,7 +259,7 @@ export function showIdle() {
       h('div', { class: 'stat' }, h('div', { class: 's-label' }, 'سفرهای امروز'), h('div', { class: 's-value' }, fa.num(t?.trips || 0))),
       h('div', { class: 'stat' }, h('div', { class: 's-label' }, 'نرخ پذیرش'), h('div', { class: 's-value' }, `${fa.num(S.driver.acceptance_rate)}٪`))),
     S.manualPos ? h('p', { class: 'hint center mt' }, 'حالت دستی: خودروی خود را روی نقشه بکشید تا موقعیتتان تغییر کند.') : null);
-  if (S.pos) S.map.setView(S.pos, Math.max(S.map.getZoom(), 14));
+  if (S.pos) moveTo(S.map, S.pos, Math.max(S.map.getZoom(), 14));
 }
 
 async function toggleDemand() {

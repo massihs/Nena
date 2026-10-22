@@ -41,6 +41,9 @@ export function createApp() {
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'مسیر یافت نشد')));
 
   app.use('/vendor/leaflet', express.static(path.join(root, 'node_modules/leaflet/dist'), { maxAge: '7d' }));
+  app.use('/vendor/maplibre', express.static(path.join(root, 'node_modules/maplibre-gl/dist'), { maxAge: '7d' }));
+  app.use('/vendor/maplibre-leaflet', express.static(path.join(root, 'node_modules/@maplibre/maplibre-gl-leaflet'), { maxAge: '7d' }));
+  app.use('/vendor/rtl-text', express.static(path.join(root, 'node_modules/@mapbox/mapbox-gl-rtl-text/dist'), { maxAge: '30d' }));
   app.use('/vendor/vazirmatn', express.static(path.join(root, 'node_modules/vazirmatn'), { maxAge: '30d' }));
   app.get('/track/:token', (_req, res) => res.sendFile(path.join(root, 'public/track/index.html')));
   app.use(express.static(path.join(root, 'public'), { extensions: ['html'] }));
