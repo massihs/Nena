@@ -368,3 +368,10 @@ textarea.input { min-height: 80px; resize: vertical; }
 .leaflet-container { font-family: inherit; }
 .leaflet-control-attribution { font-size: 10px; }
 .leaflet-div-icon { background: none; border: 0; }
+
+/* service tiles on the rider home screen */
+.service-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.service-tile { padding: 12px; cursor: pointer; border: 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.service-tile:hover { background: var(--soft); }
+.service-tile .st-art { width: 80px; height: 50px; }
+.service-tile .st-art svg { width: 100%; height: 100%; }

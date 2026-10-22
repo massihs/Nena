@@ -82,7 +82,7 @@ const BIKE_TOP = `<svg viewBox="0 0 40 40"><rect x="17" y="5" width="6" height="
   <rect x="12" y="10" width="16" height="3" rx="1.5" fill="#222"/><circle cx="20" cy="22" r="4" fill="#222"/></svg>`;
 
 export function carIcon(type = 'eco', heading = 0) {
-  const svg = type === 'bike' ? BIKE_TOP : CAR_TOP(type === 'van' ? '#1d3fa6' : type === 'plus' ? '#444' : '#111');
+  const svg = type === 'bike' ? BIKE_TOP : CAR_TOP({ van: '#1d3fa6', plus: '#444', black: '#000' }[type] || '#3a3a3a');
   return L.divIcon({
     className: 'car-marker',
     html: `<div class="car-rot" style="transform:rotate(${heading || 0}deg)">${svg}</div>`,

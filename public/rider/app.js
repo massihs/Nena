@@ -18,7 +18,7 @@ export const S = {
   cfg: null, user: null, map: null, me: null, socket: null,
   pickup: null, dropoff: null, stops: [],
   estimate: null, type: 'eco', payment: 'cash', promo: '', scheduledAt: null, notes: '', recipient: { name: '', phone: '' },
-  ride: null, view: null, unread: 0, places: [], recents: [],
+  ride: null, view: null, unread: 0, places: [], recents: [], types: [],
 };
 const layers = { nearby: null, route: null, markers: null, driver: null, me: null };
 let sheet, centerPin;
@@ -72,9 +72,10 @@ export async function refreshUser() {
 
 async function loadPlaces() {
   try {
-    const [p, r] = await Promise.all([api.get('/rider/places'), api.get('/rider/recent-destinations')]);
+    const [p, r, t] = await Promise.all([api.get('/rider/places'), api.get('/rider/recent-destinations'), api.get('/rider/ride-types')]);
     S.places = p.places;
     S.recents = r.places;
+    S.types = t.ride_types;
     if (S.view === 'home') showHome();
   } catch { /* non-critical */ }
 }
@@ -272,15 +273,13 @@ export function showHome() {
       ? h('div', { class: 'list mt' }, S.recents.map((r) => listItem({ iconName: 'clock', title: shortAddr(r.address), sub: r.address, onclick: () => goTo(r) })))
       : null,
     h('div', { class: 'divider' }),
-    h('div', { class: 'row between' },
-      h('div', { class: 'bold' }, 'سرویس‌های نِنا'),
-      h('span', { class: 'muted small' }, 'سواری • موتور • پیک')),
-    h('div', { class: 'chips mt' },
-      [['eco', 'سواری', 'car'], ['bike', 'موتور', 'bike'], ['box', 'ارسال مرسوله', 'box'], ['van', 'ون', 'van']].map(([k, label, art]) =>
+    S.types.length ? h('div', { class: 'bold' }, 'سرویس‌های نِنا') : null,
+    h('div', { class: 'service-tiles mt' },
+      S.types.map((t) => [t.key, t.name, t.icon, t.description]).map(([k, label, art, desc]) =>
         h('button', {
-          class: 'card', style: { padding: '8px 12px', minWidth: '96px', cursor: 'pointer', border: 0, textAlign: 'center' },
+          class: 'card service-tile',
           onclick: () => { S.type = k; showSearch('dropoff'); },
-        }, h('div', { style: { width: '64px', height: '40px', margin: '0 auto' } }, vehicleArt(art)), h('div', { class: 'small bold' }, label)))),
+        }, h('div', { class: 'st-art' }, vehicleArt(art)), h('div', { class: 'bold' }, label), h('div', { class: 'tiny muted' }, desc)))),
   );
 }
 

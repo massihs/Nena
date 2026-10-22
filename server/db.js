@@ -244,8 +244,10 @@ export function tx(fn) {
 
 const RIDE_TYPES = [
   // key, name, description, icon, seats, vehicle_types, base, per_km, per_min, min, wait/min, commission, delivery, sort
-  ['eco', 'نِنا اکو', 'سفر اقتصادی روزمره', 'car', 4, 'eco,plus', 25000, 9000, 1500, 50000, 2000, 15, 0, 1],
-  ['plus', 'نِنا پلاس', 'خودروهای نو و راحت', 'car-plus', 4, 'plus', 40000, 13000, 2200, 80000, 3000, 15, 0, 2],
+  ['eco', 'نِنا اکو', 'سفر اقتصادی و به‌صرفه', 'car', 4, 'eco,black', 25000, 9000, 1500, 50000, 2000, 15, 0, 1],
+  ['black', 'نِنا بلک', 'خودروی لوکس مشکی با راننده حرفه‌ای', 'car-black', 4, 'black', 70000, 20000, 3500, 140000, 5000, 20, 0, 2],
+  // Services below are kept for later but launched disabled (see CATALOG_VERSION).
+  ['plus', 'نِنا پلاس', 'خودروهای نو و راحت', 'car-plus', 4, 'plus', 40000, 13000, 2200, 80000, 3000, 15, 0, 3],
   ['van', 'نِنا ون', 'تا ۶ مسافر با بار بیشتر', 'van', 6, 'van', 55000, 16000, 2500, 110000, 3500, 15, 0, 3],
   ['bike', 'نِنا موتور', 'سریع‌ترین راه عبور از ترافیک', 'bike', 1, 'bike', 15000, 6000, 900, 35000, 1500, 12, 0, 4],
   ['box', 'نِنا باکس', 'ارسال مرسوله با پیک موتوری', 'box', 0, 'bike', 20000, 7000, 1000, 40000, 1500, 12, 1, 5],
@@ -271,6 +273,16 @@ const insertType = db.prepare(`INSERT OR IGNORE INTO ride_types
   (key, name, description, icon, seats, vehicle_types, base_fare, per_km, per_min, min_fare, wait_per_min, commission_pct, is_delivery, sort)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 for (const t of RIDE_TYPES) insertType.run(...t);
+
+// Launch catalogue: only Eco and Black. Applied once, so admins can re-enable other services later.
+const CATALOG_VERSION = 2;
+const catalog = db.prepare("SELECT value FROM settings WHERE key = 'catalog_version'").get();
+if (!catalog || Number(JSON.parse(catalog.value)) < CATALOG_VERSION) {
+  db.prepare("UPDATE ride_types SET active = CASE WHEN key IN ('eco', 'black') THEN 1 ELSE 0 END").run();
+  db.prepare("UPDATE ride_types SET vehicle_types = 'eco,black' WHERE key = 'eco'").run();
+  db.prepare("INSERT INTO settings (key, value) VALUES ('catalog_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .run(JSON.stringify(CATALOG_VERSION));
+}
 
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insertSetting.run(k, JSON.stringify(v));

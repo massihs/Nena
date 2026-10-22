@@ -47,4 +47,4 @@ export const STATUS_FA = {
   cancelled: 'لغو شده',
 };
 
-export const VEHICLE_FA = { eco: 'سواری اقتصادی', plus: 'سواری لوکس', van: 'ون', bike: 'موتورسیکلت' };
+export const VEHICLE_FA = { eco: 'اکو', black: 'بلک (لوکس مشکی)', plus: 'سواری لوکس', van: 'ون', bike: 'موتورسیکلت' };

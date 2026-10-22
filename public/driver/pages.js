@@ -44,10 +44,21 @@ export function openRegistration(ctx, { step = 1 } = {}) {
   }
 
   function step2() {
-    const types = [['eco', 'سواری اقتصادی', 'car'], ['plus', 'سواری لوکس', 'car-plus'], ['van', 'ون (۶ نفر)', 'van'], ['bike', 'موتورسیکلت / پیک', 'bike']];
+    const types = [['eco', 'نِنا اکو', 'car', 'هر سواری سالم و تمیز'], ['black', 'نِنا بلک', 'car-black', 'لوکس، مشکی، مدل ۱۳۹۸ به بعد']];
     const pick = h('div', { class: 'vehicle-pick' });
     const plateBox = h('div', {});
-    const drawPick = () => mount(pick, types.map(([k, label, art]) => h('button', { class: form.vehicle_type === k ? 'selected' : '', type: 'button', onclick: () => { form.vehicle_type = k; form.plate = ''; drawPick(); drawPlate(); } }, vehicleArt(art), label)));
+    const blackNote = h('div', { class: 'card small mt' });
+    const drawPick = () => {
+      mount(pick, types.map(([k, label, art, desc]) => h('button', { class: form.vehicle_type === k ? 'selected' : '', type: 'button', onclick: () => { form.vehicle_type = k; drawPick(); } },
+        vehicleArt(art), label, h('span', { class: 'tiny muted', style: { fontWeight: 500 } }, desc))));
+      blackNote.classList.toggle('hidden', form.vehicle_type !== 'black');
+      mount(blackNote, h('div', { class: 'bold' }, 'شرایط نِنا بلک'),
+        h('ul', { class: 'muted', style: { margin: '4px 0 0', paddingInlineStart: '18px' } },
+          h('li', {}, 'خودروی سدان لوکس به رنگ مشکی (مثل کمری، سوناتا، اپتیما، بنز، BMW)'),
+          h('li', {}, 'مدل ۱۳۹۸ (۲۰۱۹) یا جدیدتر، بدون آسیب ظاهری'),
+          h('li', {}, 'پوشش رسمی و برخورد حرفه‌ای'),
+          h('li', {}, 'کرایه بالاتر و سهم بیشتر برای شما')));
+    };
     const drawPlate = () => {
       const parts = form.plate.split('|');
       if (form.vehicle_type === 'bike') {
@@ -80,9 +91,9 @@ export function openRegistration(ctx, { step = 1 } = {}) {
     });
     frame(2,
       h('h2', {}, 'مشخصات وسیله نقلیه'),
-      h('div', { class: 'field' }, h('label', {}, 'نوع وسیله'), pick),
-      field('مدل', 'vehicle_model', { placeholder: 'مثلاً پژو ۲۰۶، سمند، ساینا' }),
-      h('div', { class: 'row' }, h('div', { class: 'grow' }, field('رنگ', 'vehicle_color', { placeholder: 'سفید' })), h('div', { class: 'grow' }, field('سال ساخت', 'vehicle_year', { ltr: true, inputmode: 'numeric', placeholder: '۱۴۰۰' }))),
+      h('div', { class: 'field' }, h('label', {}, 'سرویس'), pick, blackNote),
+      field('مدل', 'vehicle_model', { placeholder: 'مثلاً پژو ۲۰۶ (اکو) یا تویوتا کمری (بلک)' }),
+      h('div', { class: 'row' }, h('div', { class: 'grow' }, field('رنگ', 'vehicle_color', { placeholder: 'سفید / مشکی' })), h('div', { class: 'grow' }, field('سال ساخت', 'vehicle_year', { ltr: true, inputmode: 'numeric', placeholder: '۱۴۰۰' }))),
       plateBox,
       field('شماره شبا (اختیاری)', 'sheba', { ltr: true, placeholder: 'IR...', hint: 'برای واریز درآمد؛ بعداً هم قابل ثبت است' }),
       submit,
@@ -271,7 +282,7 @@ function openVehicle(ctx) {
   const p = page('خودرو و مدارک');
   const d = ctx.S.driver;
   mount(p.body,
-    h('div', { class: 'card row' }, h('div', { style: { width: '64px', height: '40px' } }, vehicleArt(d.vehicle_type === 'bike' ? 'bike' : d.vehicle_type === 'van' ? 'van' : 'car')),
+    h('div', { class: 'card row' }, h('div', { style: { width: '64px', height: '40px' } }, vehicleArt({ bike: 'bike', van: 'van', black: 'car-black' }[d.vehicle_type] || 'car')),
       h('div', { class: 'grow' }, h('div', { class: 'bold' }, `${d.vehicle_model} ${d.vehicle_color}`), h('div', { class: 'muted small' }, `${fa.VEHICLE_FA[d.vehicle_type]} • مدل ${fa.faDigits(d.vehicle_year)}`)),
       plateEl(d.plate)),
     h('h3', { class: 'mt-lg' }, 'مدارک'),

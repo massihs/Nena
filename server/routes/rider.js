@@ -3,7 +3,7 @@ import { db, getSettings } from '../db.js';
 import { HttpError, ah, int, parseLatLng } from '../util.js';
 import { requireAuth } from '../auth.js';
 import { getRideTypes, fareFor, checkPromo, promoDiscount } from '../services/pricing.js';
-import { findAvailableDrivers } from '../services/drivers.js';
+import { findAvailableDrivers, ALL_VEHICLES } from '../services/drivers.js';
 import {
   quote, createRide, getRide, rideView, activeRideFor, cancelByRider, rateRide, tipRide, changeDestination, emitRideUpdate,
 } from '../services/rides.js';
@@ -25,7 +25,7 @@ router.get('/ride-types', (_req, res) => res.json({ ride_types: getRideTypes() }
 // Anonymous car positions for the home map.
 router.get('/nearby', (req, res) => {
   const { lat, lng } = parseLatLng(req.query, 'نقشه');
-  const drivers = findAvailableDrivers(lat, lng, 4, ['eco', 'plus', 'van', 'bike'], [])
+  const drivers = findAvailableDrivers(lat, lng, 4, ALL_VEHICLES, [])
     .slice(0, 25)
     .map((d) => ({ lat: d.lat, lng: d.lng, heading: d.heading, vehicle_type: d.vehicle_type }));
   res.json({ drivers });

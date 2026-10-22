@@ -40,7 +40,10 @@ function offerNext(rideId) {
 
   const type = getRideType(ride.type);
   const declined = parseJson(ride.declined, []);
-  const [driver] = findAvailableDrivers(ride.pickup_lat, ride.pickup_lng, s.search_radius_km, type.vehicle_types.split(','), declined);
+  // Prefer the ride's own class: a Black car only takes an Eco ride when it is clearly the closer option.
+  const primary = type.vehicle_types.split(',')[0];
+  const [driver] = findAvailableDrivers(ride.pickup_lat, ride.pickup_lng, s.search_radius_km, type.vehicle_types.split(','), declined)
+    .sort((a, b) => (a.distance_km + (a.vehicle_type === primary ? 0 : 1.5)) - (b.distance_km + (b.vehicle_type === primary ? 0 : 1.5)));
   if (!driver) {
     db.prepare('UPDATE rides SET offered_driver_id = NULL, offer_expires_at = NULL WHERE id = ?').run(rideId);
     timers.set(rideId, setTimeout(() => offerNext(rideId), RETRY_MS));

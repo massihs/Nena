@@ -18,7 +18,9 @@ import { createPayment } from '../services/payment.js';
 
 const router = Router();
 
-const VEHICLE_TYPES = ['eco', 'plus', 'van', 'bike'];
+// Vehicle classes open for registration at launch.
+const VEHICLE_TYPES = ['eco', 'black'];
+const BLACK_MIN_YEAR = { jalali: 1398, gregorian: 2019 };
 const PLATE_LETTERS = 'ب ج د س ص ط ق ل م ن و ه ی ع پ ت ث ز ژ ش ف ک گ الف'.split(' ');
 export const DOCUMENT_KINDS = ['license', 'national_card', 'vehicle_card', 'insurance', 'photo'];
 
@@ -59,6 +61,11 @@ router.post('/driver/register', requireAuth, (req, res) => {
   const color = String(b.vehicle_color || '').trim().slice(0, 30);
   if (!model || !color) throw new HttpError(400, 'مدل و رنگ وسیله نقلیه را وارد کنید');
   const year = int(b.vehicle_year, { min: 1370, max: 2100, name: 'سال ساخت' }); // Jalali or Gregorian
+  if (vehicleType === 'black') {
+    const recent = year < 1500 ? year >= BLACK_MIN_YEAR.jalali : year >= BLACK_MIN_YEAR.gregorian;
+    if (!recent) throw new HttpError(400, 'برای نِنا بلک، خودرو باید مدل ۱۳۹۸ (۲۰۱۹) یا جدیدتر باشد');
+    if (!/مشکی|سیاه|black/i.test(color)) throw new HttpError(400, 'خودروهای نِنا بلک باید رنگ مشکی داشته باشند');
+  }
   const plate = normalizePlate(b.plate, vehicleType);
   const sheba = b.sheba ? normalizeSheba(b.sheba) : null;
   if (b.sheba && !sheba) throw new HttpError(400, 'شماره شبا نامعتبر است');

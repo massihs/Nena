@@ -4,6 +4,7 @@ import { bbox, haversineKm, etaMinutes } from './geo.js';
 import { emitTo } from '../realtime.js';
 
 const STALE_MS = 90 * 1000;
+export const ALL_VEHICLES = ['eco', 'black', 'plus', 'van', 'bike'];
 
 export function getDriver(userId) {
   return db.prepare('SELECT * FROM drivers WHERE user_id = ?').get(userId);
@@ -56,7 +57,7 @@ export function findAvailableDrivers(lat, lng, radiusKm, vehicleTypes, excludeId
 }
 
 export function countAvailableDrivers(lat, lng, radiusKm) {
-  return nearbyRows(lat, lng, radiusKm, ['eco', 'plus', 'van', 'bike']).length;
+  return nearbyRows(lat, lng, radiusKm, ALL_VEHICLES).length;
 }
 
 export function updateDriverLocation(userId, { lat, lng, heading }) {

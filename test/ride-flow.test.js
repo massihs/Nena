@@ -10,7 +10,7 @@ async function makeDriver(phone, seed, at, vehicle = 'eco') {
   const token = await t.login(phone);
   const reg = await t.api(token, 'POST', '/api/driver/register', {
     name: `راننده ${seed}`, national_id: nationalId(seed), license_no: '1234567890', vehicle_type: vehicle,
-    vehicle_model: 'پژو ۲۰۶', vehicle_color: 'سفید', vehicle_year: 1400, plate: vehicle === 'bike' ? '123|45678' : '12|ب|345|67',
+    vehicle_model: vehicle === 'black' ? 'تویوتا کمری' : 'پژو ۲۰۶', vehicle_color: vehicle === 'black' ? 'مشکی' : 'سفید', vehicle_year: 1400, plate: '12|ب|345|67',
   });
   assert.equal(reg.status, 200, JSON.stringify(reg));
   assert.equal(reg.driver.status, 'pending');
@@ -49,7 +49,9 @@ test('full ride: request → offer → accept → arrive → start → complete 
   const eco = est.options.find((o) => o.type === 'eco');
   assert.ok(eco.fare >= 50000 && eco.fare % 1000 === 0, `fare ${eco.fare}`);
   assert.ok(eco.eta_min >= 1);
-  assert.equal(est.options.find((o) => o.type === 'van').eta_min, null);
+  assert.deepEqual(est.options.map((o) => o.type), ['eco', 'black'], 'launch catalogue is Eco + Black');
+  assert.equal(est.options.find((o) => o.type === 'black').eta_min, null, 'an Eco car never shows as a Black ETA');
+  assert.ok(est.options[1].fare > est.options[0].fare);
 
   const offerP = t.waitFor(driver.sock, 'ride:offer');
   const created = await t.api(rider, 'POST', '/api/rider/rides', {
@@ -225,16 +227,50 @@ test('driver cancellation re-dispatches; admin can see live data', async () => {
   assert.equal(cancel.ride.cancel_fee, 0);
 });
 
-test('delivery requires a recipient; scheduled rides wait', async () => {
+test('disabled services are refused until an admin enables them; scheduled rides wait', async () => {
   const rider = await t.login('09355555555');
+  const admin = await t.login('09120000000');
+  const off = await t.api(rider, 'POST', '/api/rider/rides', { type: 'box', pickup: TEHRAN.azadi, dropoff: TEHRAN.enghelab });
+  assert.equal(off.status, 400);
+  await t.api(admin, 'PUT', '/api/admin/ride-types/box', { active: true });
   const box = await t.api(rider, 'POST', '/api/rider/rides', { type: 'box', pickup: TEHRAN.azadi, dropoff: TEHRAN.enghelab });
-  assert.equal(box.status, 400);
-  assert.match(box.error, /گیرنده/);
+  assert.match(box.error, /گیرنده/, 'delivery requires a recipient');
+  await t.api(admin, 'PUT', '/api/admin/ride-types/box', { active: false });
 
   const at = Date.now() + 60 * 60 * 1000;
-  const s = await t.api(rider, 'POST', '/api/rider/rides', { type: 'plus', pickup: TEHRAN.azadi, dropoff: TEHRAN.enghelab, scheduled_at: at });
+  const s = await t.api(rider, 'POST', '/api/rider/rides', { type: 'black', pickup: TEHRAN.azadi, dropoff: TEHRAN.enghelab, scheduled_at: at });
   assert.equal(s.ride.status, 'scheduled');
   const list = await t.api(rider, 'GET', '/api/rider/rides/scheduled');
   assert.equal(list.rides.length, 1);
   assert.equal((await t.api(rider, 'POST', `/api/rider/rides/${s.ride.id}/cancel`)).ride.cancel_fee, 0);
+});
+
+test('Black: vehicle requirements, Black-only dispatch, Eco prefers Eco cars', async () => {
+  const token = await t.login('09126666660');
+  const base = { name: 'کامران رادمنش', national_id: nationalId(66666660), license_no: '1234567890', vehicle_type: 'black', vehicle_model: 'تویوتا کمری', plate: '44|س|444|44' };
+  assert.match((await t.api(token, 'POST', '/api/driver/register', { ...base, vehicle_color: 'سفید', vehicle_year: 1400 })).error, /مشکی/);
+  assert.match((await t.api(token, 'POST', '/api/driver/register', { ...base, vehicle_color: 'مشکی', vehicle_year: 1392 })).error, /۱۳۹۸/);
+  assert.equal((await t.api(token, 'POST', '/api/driver/register', { ...base, vehicle_type: 'van', vehicle_color: 'مشکی', vehicle_year: 1400 })).status, 400);
+
+  const at = { lat: 35.7300, lng: 51.3500 };
+  const black = await makeDriver('09126666661', 66666661, at, 'black');
+  const eco = await makeDriver('09126666662', 66666662, { lat: 35.7320, lng: 51.3520 }, 'eco');
+  const rider = await t.login('09356666666');
+  const pickup = { lat: 35.7301, lng: 51.3501, address: 'مبدأ' };
+
+  // A Black request only ever goes to Black cars.
+  const blackOffer = t.waitFor(black.sock, 'ride:offer');
+  const r1 = (await t.api(rider, 'POST', '/api/rider/rides', { type: 'black', pickup, dropoff: TEHRAN.tajrish })).ride;
+  assert.equal((await blackOffer).ride.type, 'black');
+  await t.api(black.token, 'POST', `/api/driver/offers/${r1.id}/decline`);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await t.api(eco.token, 'GET', '/api/driver/offer')).offer, null, 'Eco car never gets a Black request');
+  await t.api(rider, 'POST', `/api/rider/rides/${r1.id}/cancel`);
+
+  // An Eco request prefers the Eco car even though the Black car is a little closer.
+  const ecoOffer = t.waitFor(eco.sock, 'ride:offer');
+  const r2 = (await t.api(rider, 'POST', '/api/rider/rides', { type: 'eco', pickup, dropoff: TEHRAN.tajrish })).ride;
+  assert.equal((await ecoOffer).ride.id, r2.id);
+  await t.api(rider, 'POST', `/api/rider/rides/${r2.id}/cancel`);
+  for (const d of [black, eco]) await t.api(d.token, 'POST', '/api/driver/online', { online: false });
 });
