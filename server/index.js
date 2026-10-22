@@ -3,7 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
-import './db.js';
+import { closeDb } from './db.js';
 import { HttpError } from './util.js';
 import { initRealtime, closeRealtime } from './realtime.js';
 import { resumeDispatch, stopAllDispatch } from './services/matching.js';
@@ -78,7 +78,24 @@ export function startServer(port = config.port) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { port } = await startServer();
+  const { port, close } = await startServer();
+  // Hosts stop the old instance with SIGTERM on every deploy: finish requests and flush the
+  // SQLite write-ahead log so nothing is lost.
+  let stopping = false;
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.on(signal, async () => {
+      if (stopping) return;
+      stopping = true;
+      console.log(`${signal}: shutting down`);
+      const timer = setTimeout(() => process.exit(1), 10000);
+      try { await close(); } finally {
+        closeDb();
+        clearTimeout(timer);
+        process.exit(0);
+      }
+    });
+  }
+  console.log(`data: ${config.dbPath}${config.persistentStorage ? '' : ' (default local path; set DB_PATH to a persistent disk in production)'}`);
   console.log(`نِنا روی ${config.publicUrl} اجرا شد (port ${port})`);
   console.log(`  مسافر:  ${config.publicUrl}/rider/`);
   console.log(`  راننده: ${config.publicUrl}/driver/`);

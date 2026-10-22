@@ -1,14 +1,26 @@
 # Render Blueprint: https://render.com/docs/blueprint-spec
+# Persistent disks need a paid instance (free web services cannot attach one).
+# Cost: Starter instance + $0.25 per GB per month for the disk.
 services:
   - type: web
     name: nena
     runtime: docker
-    plan: free
+    plan: starter
     region: frankfurt
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeploy: true
+    # Database and driver documents live on this disk and survive deploys and restarts.
+    # A disk can be enlarged later but never shrunk.
+    disk:
+      name: nena-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
+      - key: DB_PATH
+        value: /var/data/nena.db
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
       - key: JWT_SECRET
         generateValue: true
       # Demo mode: login codes are shown on screen (no SMS provider needed).

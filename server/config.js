@@ -10,6 +10,8 @@ export const config = {
     || (env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`),
   jwtSecret: env.JWT_SECRET || 'nena-dev-secret-change-me',
   dbPath: env.DB_PATH || 'data/nena.db',
+  // True when the database path was set explicitly (e.g. a mounted disk), false for the default local file.
+  persistentStorage: Boolean(env.DB_PATH) && env.DB_PATH !== ':memory:',
   uploadDir: env.UPLOAD_DIR || 'data/uploads',
 
   // Phones listed here are given admin access on login.

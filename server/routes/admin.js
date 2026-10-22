@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import { config } from '../config.js';
 import { db, getSettings, updateSettings } from '../db.js';
@@ -247,7 +248,21 @@ router.post('/places', (req, res) => res.status(201).json({ place: savePlace(req
 router.put('/places/:id', (req, res) => res.json({ place: savePlace(req.body || {}, Number(req.params.id)) }));
 router.delete('/places/:id', (req, res) => { deletePlace(req.params.id); res.json({ ok: true }); });
 
-router.get('/settings', (_req, res) => res.json({ settings: getSettings() }));
+router.get('/settings', (_req, res) => res.json({ settings: getSettings(), storage: storageInfo() }));
+
+function storageInfo() {
+  let size = 0;
+  try { if (config.dbPath !== ':memory:') size = fs.statSync(config.dbPath).size; } catch { /* not created yet */ }
+  return { persistent: config.persistentStorage, path: config.dbPath, size_bytes: size };
+}
+
+// Consistent snapshot of the whole database (safe while the app is running).
+router.get('/backup', (_req, res) => {
+  const file = path.join(os.tmpdir(), `nena-backup-${Date.now()}.db`);
+  db.prepare('VACUUM INTO ?').run(file);
+  const stamp = new Date(Date.now() + 3.5 * 3600 * 1000).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  res.download(file, `nena-backup-${stamp}.db`, () => fs.rm(file, { force: true }, () => {}));
+});
 router.put('/settings', (req, res) => res.json({ settings: updateSettings(req.body || {}) }));
 
 router.get('/promos', (_req, res) => res.json({ promos: db.prepare('SELECT * FROM promos ORDER BY rowid DESC').all() }));

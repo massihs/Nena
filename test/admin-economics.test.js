@@ -104,3 +104,22 @@ test('economics: period totals, net revenue, service split, balances', async () 
   assert.equal(e.top_drivers.find((x) => x.name === 'راننده 88880002').trips, 1);
   assert.equal((await t.api(rider, 'GET', '/api/admin/economics')).status, 403);
 });
+
+test('admin backup returns a valid SQLite snapshot', async () => {
+  const res = await fetch(`${t.base}/api/admin/backup`, { headers: { Authorization: `Bearer ${admin}` } });
+  assert.equal(res.status, 200);
+  const buf = Buffer.from(await res.arrayBuffer());
+  assert.equal(buf.subarray(0, 15).toString(), 'SQLite format 3');
+  const { DatabaseSync } = await import('node:sqlite');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const file = `${os.tmpdir()}/nena-restore-test.db`;
+  fs.writeFileSync(file, buf);
+  const copy = new DatabaseSync(file);
+  assert.ok(copy.prepare('SELECT COUNT(*) AS n FROM users').get().n > 0);
+  copy.close();
+  fs.rmSync(file);
+  const rider = await t.login('09358889999');
+  assert.equal((await fetch(`${t.base}/api/admin/backup`, { headers: { Authorization: `Bearer ${rider}` } })).status, 403);
+  assert.equal((await t.api(admin, 'GET', '/api/admin/settings')).storage.persistent, false);
+});

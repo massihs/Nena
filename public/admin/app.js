@@ -509,8 +509,36 @@ const SETTING_GROUPS = [
   ]],
 ];
 
+// Database snapshot, fetched with the auth header and saved as a file.
+async function downloadBackup(btn) {
+  await busy(btn, async () => {
+    const res = await fetch('/api/admin/backup', { headers: { Authorization: `Bearer ${api.token}` } });
+    if (!res.ok) throw new Error('تهیه نسخه پشتیبان ناموفق بود');
+    const name = /filename="?([^"]+)"?/.exec(res.headers.get('content-disposition') || '')?.[1] || 'nena-backup.db';
+    const a = h('a', { href: URL.createObjectURL(await res.blob()), download: name });
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('نسخه پشتیبان دانلود شد', 'success');
+  });
+}
+
+function storageCard(st) {
+  const mb = (st.size_bytes / 1024 / 1024).toFixed(1);
+  const backup = h('button', { class: 'btn btn-block mt' }, icon('doc'), 'دانلود نسخه پشتیبان کامل');
+  backup.onclick = () => downloadBackup(backup);
+  return h('div', { class: 'card', style: { borderInlineStart: `4px solid ${st.persistent ? 'var(--accent)' : 'var(--warn)'}` } },
+    h('h3', {}, 'ذخیره‌سازی داده‌ها'),
+    st.persistent
+      ? h('p', { class: 'badge green' }, '✓ دیسک ماندگار — داده‌ها با هر به‌روزرسانی حفظ می‌شوند')
+      : h('p', { class: 'badge yellow' }, '⚠ ذخیره‌سازی موقت — با راه‌اندازی مجدد سرور داده‌ها پاک می‌شوند'),
+    h('div', { class: 'kv' }, h('span', { class: 'muted' }, 'مسیر پایگاه داده'), h('span', { class: 'ltr small' }, st.path)),
+    h('div', { class: 'kv' }, h('span', { class: 'muted' }, 'حجم فعلی'), h('span', {}, `${fa.num(Number(mb), 1)} مگابایت`)),
+    h('p', { class: 'hint mt' }, 'نسخه پشتیبان شامل همه کاربران، سفرها، تراکنش‌ها، تنظیمات، مکان‌ها و محدوده‌ها است (بدون تصاویر مدارک). آن را در جای امن نگه دارید.'),
+    backup);
+}
+
 async function settings() {
-  const { settings: s } = await api.get('/admin/settings');
+  const { settings: s, storage } = await api.get('/admin/settings');
   const inputs = {};
   const control = (k) => {
     const v = s[k];
@@ -530,7 +558,7 @@ async function settings() {
   mount(S.main,
     h('h1', {}, 'تنظیمات'),
     h('p', { class: 'muted small' }, 'کمیسیون و کرایه هر سرویس در «سرویس‌ها و تعرفه‌ها» و ضرایب در «افزایش قیمت» تنظیم می‌شوند.'),
-    h('div', { class: 'grid-cards' }, SETTING_GROUPS.map(([title, rows]) => h('div', { class: 'card' },
+    h('div', { class: 'grid-cards' }, storageCard(storage), SETTING_GROUPS.map(([title, rows]) => h('div', { class: 'card' },
       h('h3', {}, title),
       rows.map(([k, label, hint]) => h('div', { class: 'setting-row' }, h('div', {}, h('div', { class: 'bold' }, label), h('span', { class: 'hint' }, hint)), control(k)))))),
     save);

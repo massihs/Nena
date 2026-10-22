@@ -237,6 +237,13 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `);
 
+export function closeDb() {
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.close();
+  } catch { /* already closed */ }
+}
+
 let txDepth = 0;
 // Runs fn inside a transaction; nested calls join the outer transaction.
 export function tx(fn) {
