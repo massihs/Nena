@@ -4,6 +4,7 @@ import {
 import * as fa from '/shared/fa.js';
 import { openChat as chat } from '/shared/chat.js';
 import { openSafety as safety } from '/shared/safety.js';
+import { placeResult } from '/shared/places.js';
 
 const RIDER_REPLIES = ['دارم میام', 'کجا هستید؟', 'لطفاً چند دقیقه صبر کنید', 'جلوی در منتظرم', 'ممنون'];
 
@@ -36,16 +37,17 @@ export function searchPlace(ctx, title) {
       ctx.S.places.forEach((pl) => items.push(listItem({ iconName: 'star', title: pl.title, sub: pl.address, onclick: () => finish({ lat: pl.lat, lng: pl.lng, address: pl.address || pl.title }) })));
       mount(results, items);
     };
+    let seq = 0;
     const run = debounce(async (q) => {
       if (q.trim().length < 2) return suggestions();
+      const mine = ++seq;
       const c = ctx.S.me || ctx.map.getCenter();
       try {
         const { results: items } = await ctx.api.get(`/geo/search?q=${encodeURIComponent(q)}&lat=${c.lat}&lng=${c.lng}`);
-        mount(results, items.length
-          ? items.map((it) => listItem({ iconName: 'pin', title: it.title, sub: it.address, onclick: () => finish({ lat: it.lat, lng: it.lng, address: [it.title, it.address].filter(Boolean).join('، ') }) }))
-          : h('div', { class: 'empty' }, 'نتیجه‌ای یافت نشد'));
-      } catch (err) { mount(results, h('div', { class: 'empty' }, err.message)); }
-    }, 350);
+        if (mine !== seq) return;
+        mount(results, items.length ? items.map((it) => placeResult(ctx.api, it, finish)) : h('div', { class: 'empty' }, 'نتیجه‌ای یافت نشد'));
+      } catch (err) { if (mine === seq) mount(results, h('div', { class: 'empty' }, err.message)); }
+    }, 250);
     input.addEventListener('input', () => run(input.value));
     mount(p.body, input, results);
     suggestions();

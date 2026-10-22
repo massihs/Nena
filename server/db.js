@@ -201,6 +201,21 @@ CREATE TABLE IF NOT EXISTS sos_alerts (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS places (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  aliases TEXT NOT NULL DEFAULT '[]',
+  category TEXT NOT NULL DEFAULT 'other',
+  address TEXT,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  popularity INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'admin',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS places_name_cat ON places(name, category);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

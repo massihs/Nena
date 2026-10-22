@@ -6,6 +6,9 @@ import { requireAuth } from '../auth.js';
 import { emitTo, emitAdmins } from '../realtime.js';
 import { getRide, rideView, participantRole } from '../services/rides.js';
 import { verifyPayment } from '../services/payment.js';
+import { searchLocal, expandQuery, normalizeFa, nearestPlace } from '../services/places.js';
+import { recordSelection } from '../services/placeStore.js';
+import { haversineKm } from '../services/geo.js';
 
 const router = Router();
 
@@ -39,32 +42,79 @@ async function cached(key, fn) {
 
 const nominatimHeaders = { 'User-Agent': 'NenaRideApp/1.0', 'Accept-Language': 'fa' };
 
-router.get('/geo/search', ah(async (req, res) => {
-  const q = String(req.query.q || '').trim().slice(0, 100);
-  if (q.length < 2 || config.geocoder === 'none') return res.json({ results: [] });
-  const lat = Number(req.query.lat) || config.map.center[0];
-  const lng = Number(req.query.lng) || config.map.center[1];
-  const results = await cached(`s:${q}:${lat.toFixed(2)}:${lng.toFixed(2)}`, async () => {
-    if (config.geocoder === 'neshan' && config.neshanKey) {
-      const url = `https://api.neshan.org/v1/search?term=${encodeURIComponent(q)}&lat=${lat}&lng=${lng}`;
-      const data = await (await fetch(url, { headers: { 'Api-Key': config.neshanKey }, signal: AbortSignal.timeout(5000) })).json();
-      return (data.items || []).slice(0, 10).map((i) => ({
-        title: i.title, address: i.address || i.region || '', lat: i.location.y, lng: i.location.x,
-      }));
-    }
+// Nominatim allows about one request per second; queue calls and skip them when the queue is long.
+let nominatimNext = 0;
+async function nominatimFetch(url) {
+  const wait = Math.max(0, nominatimNext - now());
+  if (wait > 2500) throw new Error('nominatim busy');
+  nominatimNext = Math.max(now(), nominatimNext) + 1000;
+  if (wait) await new Promise((r) => setTimeout(r, wait));
+  return (await fetch(url, { headers: nominatimHeaders, signal: AbortSignal.timeout(5000) })).json();
+}
+
+function osmAddress(a = {}, fallback = '') {
+  const parts = [a.road, a.neighbourhood || a.suburb || a.quarter, a.city_district, a.city || a.town || a.village];
+  return [...new Set(parts.filter(Boolean))].join('، ') || fallback;
+}
+
+async function externalSearch(q, lat, lng) {
+  if (config.geocoder === 'neshan' && config.neshanKey) {
+    const url = `https://api.neshan.org/v1/search?term=${encodeURIComponent(q)}&lat=${lat}&lng=${lng}`;
+    const data = await (await fetch(url, { headers: { 'Api-Key': config.neshanKey }, signal: AbortSignal.timeout(5000) })).json();
+    return (data.items || []).slice(0, 10).map((i) => ({
+      title: i.title, address: i.address || i.region || '', lat: i.location.y, lng: i.location.x, category: i.category || 'other', source: 'neshan',
+    }));
+  }
+  if (config.geocoder !== 'nominatim') return [];
+  const search = async (bounded, text = expandQuery(q)) => {
     const url = new URL('https://nominatim.openstreetmap.org/search');
     url.search = new URLSearchParams({
-      q, format: 'jsonv2', limit: '10', countrycodes: 'ir', 'accept-language': 'fa',
-      viewbox: `${lng - 0.5},${lat + 0.5},${lng + 0.5},${lat - 0.5}`,
+      q: text, format: 'jsonv2', limit: '8', countrycodes: 'ir', 'accept-language': 'fa', addressdetails: '1',
+      // Prefer the user's city (~40 km box); widen to all of Iran only if nothing is found nearby.
+      viewbox: `${lng - 0.4},${lat + 0.35},${lng + 0.4},${lat - 0.35}`, bounded: bounded ? '1' : '0',
     });
-    const data = await (await fetch(url, { headers: nominatimHeaders, signal: AbortSignal.timeout(5000) })).json();
-    return data.map((i) => {
-      const parts = i.display_name.split('،').map((p) => p.trim());
-      return { title: i.name || parts[0], address: parts.slice(1, 4).join('، '), lat: Number(i.lat), lng: Number(i.lon) };
-    });
-  }).catch(() => []);
+    return nominatimFetch(url);
+  };
+  let data = await search(true);
+  // OSM often stores streets without the prefix: "خیابان ملاصدرا" is just "ملاصدرا".
+  const bare = expandQuery(q).replace(/^(خیابان|بلوار|بزرگراه|کوچه|میدان) /, '');
+  if (data.length < 3 && bare !== expandQuery(q)) data = [...data, ...(await search(true, bare))];
+  if (!data.length) data = await search(false);
+  return data.map((i) => ({
+    title: i.name || i.display_name.split(/[،,]/)[0], address: osmAddress(i.address, i.display_name), lat: Number(i.lat), lng: Number(i.lon),
+    category: 'other', source: 'osm',
+  }));
+}
+
+router.get('/geo/search', ah(async (req, res) => {
+  const q = String(req.query.q || '').trim().slice(0, 100);
+  if (normalizeFa(q).length < 2) return res.json({ results: [] });
+  const lat = Number(req.query.lat) || config.map.center[0];
+  const lng = Number(req.query.lng) || config.map.center[1];
+  const local = searchLocal(q, { lat, lng, limit: 10 });
+  const strong = local.filter((r) => !r.weak);
+  const weak = local.filter((r) => r.weak);
+
+  // Enough name matches answer instantly; otherwise also ask the online geocoder.
+  let external = [];
+  if (strong.length < 4 && config.geocoder !== 'none') {
+    external = await cached(`s:${normalizeFa(q)}:${lat.toFixed(2)}:${lng.toFixed(2)}`, () => externalSearch(q, lat, lng)).catch(() => []);
+  }
+  // Drop online results that duplicate a curated place; show the nearest first.
+  const fresh = external
+    .filter((e) => !local.some((l) => haversineKm(l, e) < 0.25))
+    .map((e) => ({ ...e, distance_km: Math.round(haversineKm({ lat, lng }, e) * 10) / 10 }))
+    .sort((a, b) => a.distance_km - b.distance_km)
+    // A street comes back as many segments; keep the nearest one per street and neighbourhood.
+    .filter((e, i, all) => all.findIndex((x) => x.title === e.title && x.address === e.address) === i);
+  const results = [...strong, ...fresh, ...weak].slice(0, 10).map(({ weak: _w, ...r }) => r);
   res.json({ results });
 }));
+
+router.post('/geo/select', requireAuth, (req, res) => {
+  recordSelection(req.body || {});
+  res.json({ ok: true });
+});
 
 router.get('/geo/reverse', ah(async (req, res) => {
   const { lat, lng } = parseLatLng(req.query);
@@ -77,11 +127,15 @@ router.get('/geo/reverse', ah(async (req, res) => {
       return data.formatted_address || '';
     }
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&accept-language=fa&lat=${lat}&lon=${lng}`;
-    const data = await (await fetch(url, { headers: nominatimHeaders, signal: AbortSignal.timeout(5000) })).json();
+    const data = await nominatimFetch(url);
     const a = data.address || {};
     const parts = [a.neighbourhood || a.suburb, a.road, a.house_number && `پلاک ${a.house_number}`].filter(Boolean);
     return parts.join('، ') || (data.display_name || '').split('،').slice(0, 2).join('،');
   }).catch(() => '');
+  if (!address) {
+    const near = nearestPlace(lat, lng);
+    if (near) return res.json({ address: `نزدیک ${near.name}` });
+  }
   res.json({ address });
 }));
 

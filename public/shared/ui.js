@@ -82,6 +82,13 @@ const P = {
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5M16 4a3.5 3.5 0 010 7M18 14.5c2.5.5 4 2.5 4 5.5"/>',
   upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
   dot: '<circle cx="12" cy="12" r="4" fill="currentColor"/>',
+  train: '<rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M9 21l1.5-4M15 21l-1.5-4"/><circle cx="9" cy="14" r=".6" fill="currentColor"/><circle cx="15" cy="14" r=".6" fill="currentColor"/>',
+  hospital: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 8v8M8 12h8"/>',
+  bag: '<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
+  school: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5M22 9v6"/>',
+  plane: '<path d="M10.5 13.5L3 11l1.5-1.5 8 1 4-4.5a2 2 0 013 3L15 13l1 8-1.5 1.5-2.5-7.5-3 3v3L7.5 22 6 18l-4-1.5L3.5 15h3z"/>',
+  road: '<path d="M8 3L5 21M16 3l3 18M12 4v3M12 11v3M12 18v2"/>',
+  tree: '<path d="M12 22v-7M12 2l6 9h-3l4 5H5l4-5H6z"/>',
 };
 
 export function icon(name, cls = '') {

@@ -11,6 +11,7 @@ import { getRideTypes } from '../services/pricing.js';
 import { getRide, rideView, cancelByRider, emitRideUpdate } from '../services/rides.js';
 import { withdrawOffersFor } from '../services/matching.js';
 import { addTx } from '../services/wallet.js';
+import { listPlaces, savePlace, deletePlace } from '../services/placeStore.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -156,6 +157,13 @@ router.put('/ride-types/:key', (req, res) => {
   );
   res.json({ ride_type: db.prepare('SELECT * FROM ride_types WHERE key = ?').get(t.key) });
 });
+
+router.get('/places', (req, res) => {
+  res.json({ places: listPlaces({ q: req.query.q, category: String(req.query.category || '') }) });
+});
+router.post('/places', (req, res) => res.status(201).json({ place: savePlace(req.body || {}) }));
+router.put('/places/:id', (req, res) => res.json({ place: savePlace(req.body || {}, Number(req.params.id)) }));
+router.delete('/places/:id', (req, res) => { deletePlace(req.params.id); res.json({ ok: true }); });
 
 router.get('/settings', (_req, res) => res.json({ settings: getSettings() }));
 router.put('/settings', (req, res) => res.json({ settings: updateSettings(req.body || {}) }));

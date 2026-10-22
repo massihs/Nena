@@ -3,6 +3,7 @@ import { h, mount, icon, toast, toastError, modal, confirmDialog, busy, plateEl,
 import { createMap, carIcon, pinIcon } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
 import * as fa from '/shared/fa.js';
+import { categoryLabel } from '/shared/places.js';
 
 const L = window.L;
 const api = createApi('admin');
@@ -15,6 +16,7 @@ const SECTIONS = [
   ['users', 'کاربران', 'users'],
   ['rides', 'سفرها', 'history'],
   ['pricing', 'تعرفه‌ها', 'money'],
+  ['places', 'مکان‌ها و آدرس‌ها', 'pin'],
   ['promos', 'کدهای تخفیف', 'tag'],
   ['sos', 'هشدارهای ایمنی', 'sos'],
   ['payouts', 'تسویه رانندگان', 'wallet'],
@@ -73,7 +75,7 @@ function go(section) {
   S.section = section;
   clearInterval(S.liveTimer);
   drawNav();
-  ({ dashboard, drivers, users, rides, pricing, promos, sos, payouts, settings })[section]().catch(toastError);
+  ({ dashboard, drivers, users, rides, pricing, places, promos, sos, payouts, settings })[section]().catch(toastError);
 }
 
 const table = (headers, rows) => h('div', { class: 'table-wrap' }, h('table', {},
@@ -328,6 +330,67 @@ async function pricing() {
       });
       return h('tr', {}, h('td', { class: 'bold' }, t.name), ...fields.map(([k]) => h('td', {}, inputs[k])), h('td', {}, active), h('td', {}, save));
     })));
+}
+
+const PLACE_CATS = ['square', 'metro', 'neighbourhood', 'mall', 'hospital', 'university', 'transport', 'landmark', 'street', 'other'];
+const SOURCE_FA = { seed: 'پایه', admin: 'مدیر', osm: 'یادگیری از جستجو' };
+
+async function places(category = '', q = '') {
+  const { places: list } = await api.get(`/admin/places?category=${category}&q=${encodeURIComponent(q)}`);
+  const search = h('input', { class: 'input', placeholder: 'جستجوی نام، نام دیگر یا آدرس', value: q, onkeydown: (e) => { if (e.key === 'Enter') places(category, search.value).catch(toastError); } });
+  const cat = h('select', { class: 'input', style: { minWidth: '160px' }, onchange: (e) => places(e.target.value, search.value).catch(toastError) },
+    h('option', { value: '' }, 'همه دسته‌ها'), PLACE_CATS.map((c) => h('option', { value: c, selected: c === category }, categoryLabel(c))));
+  const reload = () => places(category, search.value);
+  mount(S.main,
+    h('h1', {}, 'مکان‌ها و آدرس‌ها'),
+    h('p', { class: 'muted' }, 'این مکان‌ها در جستجوی مسافران فوراً و با اولویت نمایش داده می‌شوند. مکان‌هایی که مسافران از نتایج OpenStreetMap انتخاب می‌کنند خودکار اضافه می‌شوند و پرانتخاب‌ترها بالاتر قرار می‌گیرند.'),
+    h('div', { class: 'toolbar' }, search, cat, h('span', { class: 'spacer' }),
+      h('button', { class: 'btn btn-primary', onclick: () => placeEditor(null, reload) }, icon('plus'), 'افزودن مکان')),
+    table(['نام', 'نام‌های دیگر', 'دسته', 'آدرس', 'انتخاب', 'منبع', 'فعال', ''], list.map((p) => h('tr', {},
+      h('td', { class: 'bold' }, p.name), h('td', { class: 'small muted' }, p.aliases.join('، ') || '—'),
+      h('td', {}, categoryLabel(p.category)),
+      h('td', { class: 'small', style: { maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis' } }, p.address || '—'),
+      h('td', {}, fa.num(p.popularity)), h('td', {}, h('span', { class: 'badge' }, SOURCE_FA[p.source] || p.source)),
+      h('td', {}, h('input', { type: 'checkbox', checked: p.active, onchange: (e) => api.put(`/admin/places/${p.id}`, { ...p, aliases: p.aliases.join('،'), active: e.target.checked }).then(() => toast('ذخیره شد')).catch(toastError) })),
+      h('td', {},
+        h('button', { class: 'btn btn-sm', onclick: () => placeEditor(p, reload) }, 'ویرایش'), ' ',
+        h('button', { class: 'btn btn-sm btn-danger-soft', onclick: async () => { if (await confirmDialog('حذف مکان', p.name, { danger: true })) { await api.del(`/admin/places/${p.id}`); reload().catch(toastError); } } }, 'حذف'))))),
+    h('p', { class: 'tiny muted mt' }, `${fa.num(list.length)} مکان نمایش داده شد`));
+}
+
+function placeEditor(p, reload) {
+  const f = p ? { ...p, aliases: p.aliases.join('، ') } : { name: '', aliases: '', category: 'landmark', address: '', lat: S.cfg.map.center[0], lng: S.cfg.map.center[1] };
+  modal((close) => {
+    const inp = (k, ph) => h('input', { class: 'input', placeholder: ph, value: f[k] || '', oninput: (e) => { f[k] = e.target.value; } });
+    const coords = h('div', { class: 'tiny muted ltr' });
+    const showCoords = () => { coords.textContent = `${f.lat.toFixed(6)}, ${f.lng.toFixed(6)}`; };
+    const mapEl = h('div', { style: { height: '260px', borderRadius: '12px', overflow: 'hidden' } });
+    const save = h('button', { class: 'btn btn-primary btn-lg btn-block mt' }, 'ذخیره');
+    save.onclick = () => busy(save, async () => {
+      await (p ? api.put(`/admin/places/${p.id}`, f) : api.post('/admin/places', f));
+      toast('مکان ذخیره شد', 'success');
+      close();
+      reload().catch(toastError);
+    });
+    setTimeout(() => {
+      const map = createMap(mapEl, { map: { ...S.cfg.map, center: [f.lat, f.lng], zoom: p ? 16 : 12 } });
+      const marker = L.marker([f.lat, f.lng], { draggable: true }).addTo(map);
+      const set = (ll) => { f.lat = ll.lat; f.lng = ll.lng; marker.setLatLng(ll); showCoords(); };
+      marker.on('dragend', () => set(marker.getLatLng()));
+      map.on('click', (e) => set(e.latlng));
+      showCoords();
+    }, 50);
+    return h('div', {},
+      h('h3', {}, p ? 'ویرایش مکان' : 'افزودن مکان'),
+      h('div', { class: 'field' }, h('label', {}, 'نام'), inp('name', 'مثلاً مجتمع تجاری کوروش')),
+      h('div', { class: 'field' }, h('label', {}, 'نام‌های دیگر (با ویرگول جدا کنید)'), inp('aliases', 'مثلاً کورش، پاساژ کوروش')),
+      h('div', { class: 'field' }, h('label', {}, 'دسته'), h('select', { class: 'input', onchange: (e) => { f.category = e.target.value; } },
+        PLACE_CATS.map((c) => h('option', { value: c, selected: c === f.category }, categoryLabel(c))))),
+      h('div', { class: 'field' }, h('label', {}, 'آدرس'), inp('address', 'محله، خیابان، منطقه')),
+      h('div', { class: 'field' }, h('label', {}, 'موقعیت (روی نقشه کلیک کنید یا نشانگر را بکشید)'), mapEl, coords),
+      save,
+      h('button', { class: 'btn btn-ghost btn-block mt', onclick: close }, 'انصراف'));
+  });
 }
 
 async function promos() {

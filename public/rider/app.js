@@ -5,6 +5,7 @@ import {
 } from '/shared/ui.js';
 import { createMap, carIcon, setHeading, pinIcon, meIcon, animateTo, routeLayer, fitTo, getPosition } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
+import { placeResult } from '/shared/places.js';
 import * as fa from '/shared/fa.js';
 import { openMenu, openChat, openSafety, searchPlace, openWallet } from './pages.js';
 
@@ -315,18 +316,21 @@ export function showSearch(focus = 'dropoff') {
   const results = h('div', { class: 'list mt' });
   const inputs = new Map();
 
+  let searchSeq = 0;
   const doSearch = debounce(async (q) => {
     if (q.trim().length < 2) return renderSuggestions();
+    const seq = ++searchSeq;
     mount(results, h('div', { class: 'empty' }, h('span', { class: 'spinner' })));
     const c = S.me || S.map.getCenter();
     try {
       const { results: items } = await api.get(`/geo/search?q=${encodeURIComponent(q)}&lat=${c.lat}&lng=${c.lng}`);
+      if (seq !== searchSeq) return; // a newer search is in flight
       mount(results,
-        items.length ? items.map((it) => listItem({ iconName: 'pin', title: it.title, sub: it.address, onclick: () => choose({ ...it, address: [it.title, it.address].filter(Boolean).join('، ') }) }))
+        items.length ? items.map((it) => placeResult(api, it, choose))
           : h('div', { class: 'empty' }, 'نتیجه‌ای یافت نشد؛ از «انتخاب روی نقشه» استفاده کنید'),
         pickOnMapItem());
-    } catch (err) { mount(results, h('div', { class: 'empty' }, err.message)); }
-  }, 350);
+    } catch (err) { if (seq === searchSeq) mount(results, h('div', { class: 'empty' }, err.message)); }
+  }, 250);
 
   const pickOnMapItem = () => listItem({ iconName: 'pin', title: 'انتخاب روی نقشه', sub: `${label(active)} را با جابجایی نقشه مشخص کنید`, onclick: () => showPickOnMap(active) });
 
