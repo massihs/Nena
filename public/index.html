@@ -5,66 +5,151 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#000000">
   <title>نِنا — هر جا بخواهید، همین حالا</title>
-  <meta name="description" content="نِنا: درخواست آنلاین خودرو — اکو برای سفرهای روزمره، بلک برای سفرهای لوکس">
+  <meta name="description" content="نِنا: درخواست آنلاین خودرو — اکو برای سفرهای روزمره، بلک برای سفرهای لوکس، و رزرو سفر از قبل">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/shared/style.css">
   <style>
-    body { background: #fff; }
-    .nav { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: #000; color: #fff; }
-    .nav .brand { font-size: 26px; }
-    .nav a { color: #fff; text-decoration: none; font-weight: 600; margin-inline-start: 18px; }
-    .hero { background: #000; color: #fff; padding: 56px 24px 72px; }
-    .hero-in { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: center; }
-    .hero h1 { font-size: clamp(34px, 5vw, 56px); line-height: 1.2; margin-bottom: 16px; }
-    .hero p { color: #bbb; font-size: 18px; }
-    .hero-card { background: #fff; color: #000; border-radius: 20px; padding: 24px; }
-    .section { max-width: 1100px; margin: 0 auto; padding: 56px 24px; }
-    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; margin-top: 22px; }
-    .feature { background: var(--soft); border-radius: 18px; padding: 22px; }
-    .feature h3 { margin-top: 10px; }
-    .feature .ic svg { width: 30px; height: 30px; }
-    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-    .split .card { padding: 28px; }
-    footer { background: #000; color: #999; padding: 28px 24px; text-align: center; font-size: 13px; }
-    @media (max-width: 800px) { .hero-in, .split { grid-template-columns: 1fr; } }
+    body { background: #fff; color: #000; }
+    a { text-decoration: none; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+    .nav { position: sticky; top: 0; z-index: 10; background: #000; color: #fff; }
+    .nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .nav .brand { font-size: 26px; color: #fff; }
+    .nav nav { display: flex; gap: 6px; }
+    .nav nav a { color: #fff; font-weight: 600; padding: 8px 14px; border-radius: 99px; }
+    .nav nav a:hover { background: #1f1f1f; }
+    .nav nav a.cta { background: #fff; color: #000; }
+    .hero { background: #000; color: #fff; padding: 56px 0 80px; overflow: hidden; }
+    .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; }
+    .hero h1 { font-size: clamp(36px, 5.4vw, 64px); line-height: 1.15; margin-bottom: 18px; letter-spacing: -1px; }
+    .hero p.lead { color: #bdbdbd; font-size: 18px; max-width: 520px; }
+    .book { background: #fff; color: #000; border-radius: 22px; padding: 22px; margin-top: 28px; max-width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .book .seg { display: flex; gap: 6px; background: #f3f3f3; padding: 4px; border-radius: 12px; margin-bottom: 14px; }
+    .book .seg a { flex: 1; text-align: center; padding: 8px; border-radius: 9px; font-weight: 700; color: #000; }
+    .book .seg a.on { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+    .book .field-fake { display: flex; align-items: center; gap: 12px; padding: 14px; background: #f3f3f3; border-radius: 12px; margin-bottom: 8px; color: #555; font-weight: 600; }
+    .book .field-fake i { width: 10px; height: 10px; background: #000; display: inline-block; }
+    .book .field-fake i.o { border-radius: 50%; }
+    .phone { justify-self: center; width: 290px; height: 590px; border-radius: 44px; background: #111; padding: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 0 0 2px #2a2a2a; transform: rotate(-4deg); }
+    .screen { width: 100%; height: 100%; border-radius: 34px; overflow: hidden; position: relative; background: #ececec; color: #000; }
+    .screen .map-art { position: absolute; inset: 0; background:
+      linear-gradient(90deg, transparent 47%, #fff 47%, #fff 53%, transparent 53%) 0 0 / 120px 120px,
+      linear-gradient(0deg, transparent 47%, #fff 47%, #fff 53%, transparent 53%) 0 0 / 120px 120px,
+      linear-gradient(35deg, transparent 49%, #fff 49%, #fff 52%, transparent 52%) 0 0 / 100% 100%, #e6e6e6; }
+    .screen .route { position: absolute; top: 120px; right: 70px; width: 120px; height: 170px; border: 5px solid #000; border-left: 0; border-bottom: 0; border-radius: 0 40px 0 0; }
+    .screen .car { position: absolute; top: 108px; right: 170px; width: 18px; height: 32px; background: #000; border-radius: 6px; transform: rotate(90deg); }
+    .screen .sheet-art { position: absolute; bottom: 0; left: 0; right: 0; background: #fff; border-radius: 26px 26px 0 0; padding: 16px; }
+    .screen .sheet-art .grip { width: 40px; height: 4px; background: #ddd; border-radius: 4px; margin: 0 auto 12px; }
+    .screen .opt { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 14px; margin-bottom: 6px; font-weight: 800; font-size: 14px; }
+    .screen .opt.on { box-shadow: inset 0 0 0 2px #000; background: #f6f6f6; }
+    .screen .opt small { display: block; font-weight: 500; color: #777; font-size: 11px; }
+    .screen .go { background: #000; color: #fff; text-align: center; padding: 12px; border-radius: 12px; font-weight: 800; margin-top: 8px; }
+    section.block { padding: 72px 0; }
+    section.block h2 { font-size: 32px; margin-bottom: 8px; }
+    .lead2 { color: #666; font-size: 17px; max-width: 640px; }
+    .services { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 28px; }
+    .svc { border-radius: 22px; padding: 26px; background: #f3f3f3; display: flex; flex-direction: column; gap: 8px; }
+    .svc.black { background: #000; color: #fff; }
+    .svc.black p { color: #bbb; }
+    .svc .art { width: 120px; height: 72px; }
+    .svc .art svg { width: 100%; height: 100%; }
+    .svc.black .art { background: #ececec; border-radius: 16px; padding: 6px; }
+    .svc h3 { font-size: 22px; margin: 6px 0 0; }
+    .svc p { color: #555; margin: 0; }
+    .svc .tagl { font-size: 12px; font-weight: 800; padding: 2px 10px; border-radius: 99px; background: #fff; color: #000; align-self: flex-start; }
+    .feats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 28px; }
+    .feat { padding: 22px; border-radius: 18px; border: 1px solid #e8e8e8; }
+    .feat .ic svg { width: 28px; height: 28px; }
+    .feat h3 { margin: 10px 0 6px; font-size: 17px; }
+    .feat p { color: #666; margin: 0; font-size: 14px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .panel { border-radius: 24px; padding: 34px; background: #f3f3f3; }
+    .panel.dark { background: #000; color: #fff; }
+    .panel.dark p, .panel.dark li { color: #bbb; }
+    .panel ul { padding-inline-start: 20px; margin: 12px 0 20px; line-height: 2; }
+    .install { display: flex; align-items: center; gap: 22px; padding: 26px 30px; border-radius: 24px; background: #f3f3f3; }
+    .install img { width: 72px; border-radius: 18px; }
+    footer { background: #000; color: #9a9a9a; padding: 36px 0; font-size: 13px; }
+    footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    footer a { color: #ccc; }
+    @media (max-width: 900px) {
+      .hero .wrap, .split { grid-template-columns: 1fr; }
+      .phone { display: none; }
+      .services { grid-template-columns: 1fr; }
+      .feats { grid-template-columns: repeat(2, 1fr); }
+      .nav nav a:not(.cta) { display: none; }
+      .install { flex-direction: column; text-align: center; }
+    }
   </style>
 </head>
 <body>
-  <div class="nav"><div class="brand">نِنا</div><div><a href="/rider/">سفر</a><a href="/driver/">رانندگی</a></div></div>
-  <section class="hero">
-    <div class="hero-in">
-      <div>
-        <h1>هر جا بخواهید،<br>همین حالا.</h1>
-        <p><b>نِنا اکو</b> برای سفرهای روزمره و به‌صرفه، <b>نِنا بلک</b> با خودروهای لوکس مشکی و رانندگان حرفه‌ای — با کرایه شفاف پیش از سفر، پرداخت نقدی یا کیف پول و رانندگان احراز هویت‌شده.</p>
-      </div>
-      <div class="hero-card">
-        <h2>درخواست سفر</h2>
-        <p class="muted">مبدأ و مقصد را انتخاب کنید و کرایه را ببینید.</p>
-        <a class="btn btn-primary btn-lg btn-block mt" href="/rider/">ورود به اپ مسافر</a>
-        <a class="btn btn-lg btn-block mt" href="/driver/">رانندۀ نِنا شوید</a>
+  <header class="nav"><div class="wrap">
+    <div class="brand">نِنا</div>
+    <nav><a href="#services">سرویس‌ها</a><a href="#reserve">رزرو</a><a href="/driver/">رانندگی</a><a class="cta" href="/rider/">ورود</a></nav>
+  </div></header>
+
+  <section class="hero"><div class="wrap">
+    <div>
+      <h1>هر جا بخواهید،<br>همین حالا — یا هر وقت بخواهید.</h1>
+      <p class="lead">سفر روزمره با نِنا اکو، سفر لوکس با نِنا بلک، یا رزرو از چند روز قبل. کرایه پیش از سفر مشخص است و راننده‌ها احراز هویت شده‌اند.</p>
+      <div class="book">
+        <div class="seg"><a class="on" href="/rider/">همین حالا</a><a href="/rider/#reserve">رزرو برای بعد</a></div>
+        <a class="field-fake" href="/rider/"><i class="o"></i>مبدأ: موقعیت فعلی من</a>
+        <a class="field-fake" href="/rider/"><i></i>به کجا می‌روید؟</a>
+        <a class="btn btn-primary btn-lg btn-block mt" href="/rider/">مشاهده کرایه</a>
       </div>
     </div>
-  </section>
-  <section class="section">
+    <div class="phone" aria-hidden="true"><div class="screen">
+      <div class="map-art"></div><div class="route"></div><div class="car"></div>
+      <div class="sheet-art"><div class="grip"></div>
+        <div class="opt on"><span>نِنا اکو<small>۳ دقیقه تا رسیدن</small></span><span>۵۲٬۰۰۰</span></div>
+        <div class="opt"><span>نِنا بلک<small>سدان لوکس مشکی</small></span><span>۱۴۵٬۰۰۰</span></div>
+        <div class="go">درخواست نِنا اکو</div>
+      </div>
+    </div></div>
+  </div></section>
+
+  <section class="block" id="services"><div class="wrap">
+    <h2>دو سرویس، یک تجربه</h2>
+    <p class="lead2">کرایه را قبل از درخواست ببینید، راننده را روی نقشه دنبال کنید و نقدی یا با کیف پول بپردازید.</p>
+    <div class="services">
+      <div class="svc"><div class="art" data-art="car"></div><h3>نِنا اکو</h3><p>سفرهای روزمره و به‌صرفه با خودروهای تمیز و سالم.</p></div>
+      <div class="svc black"><span class="tagl">لوکس</span><div class="art" data-art="car-black"></div><h3>نِنا بلک</h3><p>سدان‌های مشکی مدل ۱۳۹۸ به بعد با رانندگان حرفه‌ای؛ برای جلسه‌ها و فرودگاه.</p></div>
+      <div class="svc" id="reserve"><div class="art" style="display:grid;place-items:center"><span class="calendar-art" style="width:70px;height:66px"><b style="font-size:13px;line-height:20px">رزرو</b><span style="font-size:26px">۱۴</span></span></div><h3>رزرو سفر</h3><p>تا ۳۰ روز آینده رزرو کنید؛ کرایه همان لحظه قطعی می‌شود و راننده از قبل مشخص است.</p></div>
+    </div>
+  </div></section>
+
+  <section class="block" style="padding-top:0"><div class="wrap">
     <h2>چرا نِنا؟</h2>
-    <div class="features" id="features"></div>
-  </section>
-  <section class="section">
-    <div class="split">
-      <div class="card"><h2>برای مسافران</h2><p class="muted">ردیابی زنده راننده، گفتگو و تماس، اشتراک سفر با خانواده، رزرو سفر، چند مقصد، کد تخفیف و دعوت از دوستان.</p><a class="btn btn-primary mt" href="/rider/">شروع سفر</a></div>
-      <div class="card"><h2>برای رانندگان</h2><p class="muted">هر زمان خواستید آنلاین شوید، نقشه تقاضا را ببینید، درآمد روزانه و هفتگی را دنبال کنید و درآمدتان را به حساب شبا تسویه کنید.</p><a class="btn btn-primary mt" href="/driver/">ثبت‌نام رانندگان</a></div>
-    </div>
-  </section>
-  <footer>© نِنا — پلتفرم حمل‌ونقل هوشمند • <a href="/admin/" style="color:#999">پنل مدیریت</a></footer>
+    <div class="feats" id="features"></div>
+  </div></section>
+
+  <section class="block" style="padding-top:0"><div class="wrap split">
+    <div class="panel"><h2>برای مسافران</h2>
+      <ul><li>ردیابی زنده راننده و زمان رسیدن</li><li>اعلان پذیرش، رسیدن راننده و پیام‌ها</li><li>اشتراک موقعیت زنده سفر با خانواده</li><li>کد تخفیف، دعوت از دوستان و کیف پول</li></ul>
+      <a class="btn btn-primary btn-lg" href="/rider/">شروع سفر</a></div>
+    <div class="panel dark"><h2>برای رانندگان</h2>
+      <ul><li>هر وقت خواستید آنلاین شوید</li><li>پذیرش رزروها از قبل و برنامه‌ریزی روز</li><li>نقشه تقاضا و درآمد روزانه و هفتگی</li><li>تسویه مستقیم به حساب شبا</li></ul>
+      <a class="btn btn-lg" style="background:#fff;color:#000" href="/driver/">ثبت‌نام رانندگان</a></div>
+  </div></section>
+
+  <section class="block" style="padding-top:0"><div class="wrap">
+    <div class="install"><img src="/icon.svg" alt="">
+      <div style="flex:1"><h2 style="font-size:24px;margin:0">نِنا را روی گوشی نصب کنید</h2><p class="lead2" style="margin:4px 0 0">بدون نیاز به استور: صفحه را باز کنید و «Add to Home Screen» را بزنید. اعلان‌ها و حالت تمام‌صفحه فعال می‌شود.</p></div>
+      <a class="btn btn-primary btn-lg" href="/rider/">باز کردن اپ</a></div>
+  </div></section>
+
+  <footer><div class="wrap"><span>© نِنا — پلتفرم حمل‌ونقل هوشمند</span><span><a href="/driver/">رانندگان</a> • <a href="/admin/">پنل مدیریت</a></span></div></footer>
   <script type="module">
-    import { h, icon } from '/shared/ui.js';
+    import { h, icon, vehicleArt } from '/shared/ui.js';
+    for (const el of document.querySelectorAll('[data-art]')) el.append(vehicleArt(el.dataset.art));
     const items = [
       ['money', 'کرایه شفاف', 'مبلغ سفر پیش از درخواست مشخص است؛ بدون چانه‌زنی.'],
       ['shield', 'ایمنی در اولویت', 'دکمه اضطراری، اشتراک موقعیت زنده و کد سفر.'],
-      ['clock', 'رزرو سفر', 'تا ۷ روز آینده سفر خود را از پیش رزرو کنید.'],
+      ['bell', 'همیشه در جریان', 'اعلان پذیرش، رسیدن راننده و یادآوری رزرو، حتی وقتی اپ بسته است.'],
       ['wallet', 'کیف پول نِنا', 'شارژ با کارت‌های شتابی و پرداخت بدون پول نقد.'],
     ];
-    document.getElementById('features').append(...items.map(([ic, t, d]) => h('div', { class: 'feature' }, icon(ic), h('h3', {}, t), h('p', { class: 'muted' }, d))));
+    document.getElementById('features').append(...items.map(([ic, t, d]) => h('div', { class: 'feat' }, icon(ic), h('h3', {}, t), h('p', {}, d))));
   </script>
 </body>
 </html>

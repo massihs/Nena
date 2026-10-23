@@ -1,13 +1,15 @@
 import { createApi } from '/shared/api.js';
 import {
-  h, mount, icon, toast, toastError, modal, confirmDialog, busy, ratingPill, starInput, avatar, listItem, trackSheetHeight, beep, notify,
+  h, mount, icon, toast, toastError, modal, confirmDialog, busy, ratingPill, starInput, avatar, listItem, beep, notify,
 } from '/shared/ui.js';
 import { createMap, carIcon, setHeading, pinIcon, animateTo, routeLayer, fitTo, bearing, moveTo } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
 import { openChat } from '/shared/chat.js';
 import { openSafety } from '/shared/safety.js';
 import * as fa from '/shared/fa.js';
-import { openMenu, openRegistration, openEarnings } from './pages.js';
+import { openMenu, openRegistration, openEarnings, openReservations, DRIVER_PUSH_LINES } from './pages.js';
+import { draggableSheet } from '/shared/sheet.js';
+import { pushState, enablePush, syncPush } from '/shared/push.js';
 
 const L = window.L;
 const api = createApi('driver');
@@ -18,7 +20,19 @@ export const S = {
   pos: null, manualPos: false, ride: null, offer: null, view: null, today: null, demandOn: false, unread: 0,
 };
 const layers = { me: null, route: null, markers: null, demand: null };
-let sheet, offerEl, offerTimer, waitTimer;
+let sheet, sheetBox, sheetCtl, offerEl, offerTimer, waitTimer;
+
+// Switches the sheet to another screen; content animates in only when the screen changes.
+function enter(view) {
+  const changed = S.view !== view;
+  S.view = view;
+  if (!changed) return;
+  sheetCtl?.open();
+  sheetBox.scrollTop = 0;
+  sheet.classList.remove('enter');
+  void sheet.offsetWidth;
+  sheet.classList.add('enter');
+}
 
 const DRIVER_REPLIES = ['در راه هستم', 'رسیدم، جلوی در هستم', 'در ترافیک هستم، چند دقیقه دیگر می‌رسم', 'لطفاً لوکیشن دقیق بفرستید', 'باشه'];
 
@@ -60,6 +74,7 @@ export async function start() {
     history.replaceState(null, '', location.pathname);
   }
   await sync();
+  syncPush(api);
 }
 
 export function showPending() {
@@ -95,7 +110,9 @@ export async function logout() {
 }
 
 function buildShell() {
-  sheet = h('section', { class: 'sheet', id: 'sheet' });
+  sheet = h('div', { class: 'sheet-body' });
+  const grip = h('div', { class: 'sheet-grip', 'aria-label': 'جابجایی پنل' });
+  sheetBox = h('section', { class: 'sheet', id: 'sheet' }, grip, sheet);
   const menuBtn = h('button', { class: 'btn btn-icon', 'aria-label': 'منو', onclick: () => openMenu(ctx) }, icon('menu'));
   const earn = h('button', { class: 'earn-pill', id: 'earnPill', onclick: () => openEarnings(ctx) }, h('small', {}, 'درآمد امروز'), '...');
   const demandBtn = h('button', { class: 'btn btn-icon', 'aria-label': 'نقشه تقاضا', onclick: toggleDemand }, icon('fire'));
@@ -103,8 +120,8 @@ function buildShell() {
     h('div', { id: 'map', class: 'map' }),
     h('div', { class: 'topbar' }, menuBtn, h('div', { class: 'spacer' }), earn, h('div', { class: 'spacer' }), demandBtn),
     h('div', { class: 'map-fabs' }, h('button', { class: 'btn btn-icon', 'aria-label': 'موقعیت من', onclick: () => S.pos && moveTo(S.map, S.pos, 16) }, icon('locate'))),
-    sheet));
-  trackSheetHeight(sheet);
+    sheetBox));
+  sheetCtl = draggableSheet(sheetBox, grip);
   S.map = createMap(document.getElementById('map'), S.cfg);
   layers.markers = L.layerGroup().addTo(S.map);
   layers.demand = L.layerGroup().addTo(S.map);
@@ -207,6 +224,7 @@ function connectSocket() {
     notify('پیام مسافر', m.text);
     if (S.view === 'trip') renderTrip();
   });
+  S.socket.on('reservation:update', () => ctx.refreshIdle());
   S.socket.on('notice', (n) => {
     toast(n.text);
     if (n.refresh) setTimeout(() => location.reload(), 1500);
@@ -234,12 +252,12 @@ function clearTrip() {
 }
 
 export function showIdle() {
-  S.view = 'idle';
+  enter('idle');
   S.ride = null;
   clearInterval(waitTimer);
   clearTrip();
   const online = S.driver.online;
-  const go = h('button', { class: `go-btn ${online ? 'stop' : ''}` }, online ? 'آفلاین' : 'شروع');
+  const go = h('button', { class: `go-btn ${online ? 'stop' : ''}` }, online ? 'توقف' : 'شروع');
   go.onclick = () => busy(go, async () => {
     if (!online && !S.pos) throw new Error('موقعیت شما مشخص نیست');
     const { driver } = await api.post('/driver/online', { online: !online, ...(S.pos || {}) });
@@ -248,18 +266,43 @@ export function showIdle() {
     showIdle();
   });
   const t = S.today;
+  const reserve = h('div', {});
+  const pushBox = h('div', {});
   mount(sheet,
-    h('div', { class: 'row between' },
-      h('div', { class: 'row gap-sm' }, h('span', { class: `online-dot ${online ? 'on' : ''}` }), h('span', { class: 'bold' }, online ? 'آنلاین' : 'آفلاین')),
-      h('span', { class: 'muted small' }, `${fa.VEHICLE_FA[S.driver.vehicle_type]} • `, ratingPill(S.driver.rating))),
-    h('div', { class: 'mt-lg' }, go),
-    h('h3', { class: 'center mt-lg' }, online ? 'در حال یافتن سفر برای شما...' : 'برای دریافت سفر آنلاین شوید'),
-    online ? h('div', { class: 'progress-bar mt' }, h('i')) : h('p', { class: 'muted small center' }, 'با زدن «شروع»، درخواست‌های اطراف برای شما ارسال می‌شود.'),
-    h('div', { class: 'stats mt-lg' },
-      h('div', { class: 'stat' }, h('div', { class: 's-label' }, 'سفرهای امروز'), h('div', { class: 's-value' }, fa.num(t?.trips || 0))),
-      h('div', { class: 'stat' }, h('div', { class: 's-label' }, 'نرخ پذیرش'), h('div', { class: 's-value' }, `${fa.num(S.driver.acceptance_rate)}٪`))),
+    h('div', { class: 'driver-status' },
+      h('div', { class: 'row gap-sm' }, h('span', { class: `online-dot ${online ? 'on' : ''}` }),
+        h('div', {}, h('div', { class: 'bold' }, online ? 'آنلاین هستید' : 'آفلاین هستید'), h('div', { class: 'tiny muted' }, online ? 'درخواست‌های اطراف برای شما ارسال می‌شود' : 'برای دریافت سفر «شروع» را بزنید'))),
+      go),
+    online ? h('div', { class: 'progress-bar mt' }, h('i')) : null,
+    h('div', { class: 'today-row mt' },
+      h('button', { class: 'today-cell', onclick: () => openEarnings(ctx) }, h('div', { class: 'tc-v' }, fa.tomanShort(t?.total || 0)), h('div', { class: 'tc-l' }, 'درآمد امروز')),
+      h('div', { class: 'today-cell' }, h('div', { class: 'tc-v' }, fa.num(t?.trips || 0)), h('div', { class: 'tc-l' }, 'سفر امروز')),
+      h('div', { class: 'today-cell' }, h('div', { class: 'tc-v' }, `${fa.num(S.driver.acceptance_rate)}٪`), h('div', { class: 'tc-l' }, 'نرخ پذیرش')),
+      h('div', { class: 'today-cell' }, h('div', { class: 'tc-v' }, fa.num(S.driver.rating, 2)), h('div', { class: 'tc-l' }, 'امتیاز'))),
+    reserve,
+    pushBox,
     S.manualPos ? h('p', { class: 'hint center mt' }, 'حالت دستی: خودروی خود را روی نقشه بکشید تا موقعیتتان تغییر کند.') : null);
   if (S.pos) moveTo(S.map, S.pos, Math.max(S.map.getZoom(), 14));
+
+  api.get('/driver/reservations').then(({ open, mine }) => {
+    if (S.view !== 'idle') return;
+    const next = mine[0];
+    mount(reserve, h('button', { class: 'reserve-card mt', onclick: () => openReservations(ctx, next ? 'mine' : 'open') },
+      h('span', { class: 'li-icon' }, icon('calendar')),
+      h('span', { class: 'grow' },
+        h('div', { class: 'bold' }, next ? `رزرو بعدی: ${fa.jWeekday(next.scheduled_at)} ساعت ${fa.jTime(next.scheduled_at)}` : 'رزروها'),
+        h('div', { class: 'tiny muted' }, next ? `${next.pickup.address || ''} • ${fa.toman(next.estimated_earning)}` : open.length ? `${fa.num(open.length)} رزرو باز نزدیک شما — از قبل بپذیرید` : 'رزرو بازی نزدیک شما نیست')),
+      open.length && !next ? h('span', { class: 'badge green' }, fa.num(open.length)) : icon('forward')));
+  }).catch(() => {});
+  pushState().then((state) => {
+    if (S.view !== 'idle' || !['off', 'ios-install'].includes(state)) return;
+    const btn = h('button', { class: 'btn btn-sm btn-accent' }, 'فعال‌سازی');
+    btn.onclick = () => busy(btn, async () => { await enablePush(api); pushBox.replaceChildren(); toast('اعلان‌ها فعال شد', 'success'); });
+    mount(pushBox, h('div', { class: 'notice-card' }, h('span', { class: 'nc-ic' }, icon('bell')),
+      h('div', { class: 'nc-body' }, h('b', {}, 'درخواست‌ها را از دست ندهید'),
+        state === 'ios-install' ? 'در آیفون ابتدا اپ را به صفحه اصلی اضافه کنید.' : 'با اعلان، درخواست سفر حتی وقتی صفحه خاموش است با صدا می‌رسد.'),
+      state === 'off' ? btn : null));
+  }).catch(() => {});
 }
 
 async function toggleDemand() {
@@ -358,7 +401,7 @@ function drawRoute(r, fit) {
   if (fit) {
     const pts = r.status === 'in_progress' ? [S.pos, r.dropoff, ...r.stops] : [S.pos, r.pickup];
     if (r.status === 'searching') pts.push(r.dropoff);
-    fitTo(S.map, pts, r.status === 'searching' ? null : sheet);
+    fitTo(S.map, pts, r.status === 'searching' ? null : sheetBox);
   }
 }
 
@@ -367,7 +410,7 @@ export function setRide(ride) {
   if (ride.status === 'completed') return showCompleted(ride);
   if (['accepted', 'arrived', 'in_progress'].includes(ride.status)) {
     const changed = S.view !== 'trip' || S.lastStatus !== ride.status;
-    S.view = 'trip';
+    enter('trip');
     S.lastStatus = ride.status;
     drawRoute(ride, changed);
     return renderTrip();
@@ -494,7 +537,7 @@ function cancelRide() {
 }
 
 function showCompleted(ride) {
-  S.view = 'completed';
+  enter('completed');
   S.ride = null;
   clearInterval(waitTimer);
   clearTrip();
@@ -524,6 +567,7 @@ function showCompleted(ride) {
 
 export const ctx = {
   api, S, start, showIdle, refreshToday, logout,
+  refreshIdle: () => { if (S.view === 'idle') { S.view = null; showIdle(); } },
   get root() { return root; },
 };
 

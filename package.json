@@ -23,7 +23,8 @@
     "leaflet": "^1.9.4",
     "maplibre-gl": "^5.24.0",
     "socket.io": "^4.8.4",
-    "vazirmatn": "^33.0.3"
+    "vazirmatn": "^33.0.3",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "socket.io-client": "^4.8.4"

@@ -6,6 +6,7 @@ import { requireAuth } from '../auth.js';
 import { emitTo, emitAdmins } from '../realtime.js';
 import { getRide, rideView, participantRole } from '../services/rides.js';
 import { verifyPayment } from '../services/payment.js';
+import { notify, notifyAdmins, pushTo, publicKey, saveSubscription, removeSubscription } from '../services/push.js';
 import { searchLocal, expandQuery, normalizeFa, nearestPlace } from '../services/places.js';
 import { recordSelection } from '../services/placeStore.js';
 import { haversineKm } from '../services/geo.js';
@@ -25,6 +26,9 @@ router.get('/config', (_req, res) => {
     require_pin: s.require_pin,
     payment_provider: config.payment.provider,
     expose_otp: config.exposeOtp,
+    reserve_min_minutes: s.reserve_min_minutes,
+    reserve_max_days: s.reserve_max_days,
+    reserve_free_cancel_minutes: s.reserve_free_cancel_minutes,
   });
 });
 
@@ -163,6 +167,7 @@ router.post('/rides/:id/messages', requireAuth, (req, res) => {
   const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(lastInsertRowid);
   const other = role === 'rider' ? ride.driver_id : ride.rider_id;
   emitTo(other, 'chat:message', message);
+  notify(other, role === 'rider' ? 'driver' : 'rider', { title: role === 'rider' ? 'پیام مسافر' : 'پیام راننده', body: text, tag: `chat-${ride.id}` });
   emitTo(req.user.id, 'chat:message', message);
   res.status(201).json({ message });
 });
@@ -174,6 +179,7 @@ router.post('/rides/:id/sos', requireAuth, (req, res) => {
   const { lastInsertRowid } = db.prepare('INSERT INTO sos_alerts (ride_id, user_id, lat, lng, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(ride.id, req.user.id, lat, lng, now());
   emitAdmins('sos', { id: lastInsertRowid, ride_id: ride.id, user_id: req.user.id, name: req.user.name, phone: req.user.phone, lat, lng });
+  notifyAdmins({ title: '🚨 هشدار اضطراری', body: `${req.user.name || req.user.phone} — سفر #${ride.id}`, url: '/admin/#sos', tag: `sos-${lastInsertRowid}`, urgent: true, always: true });
   res.status(201).json({ ok: true, police: '110', ambulance: '115' });
 });
 
@@ -185,6 +191,29 @@ router.get('/track/:token', (req, res) => {
   if (ended) throw new HttpError(410, 'این لینک منقضی شده است');
   res.json({ ride: rideView(ride, 'public') });
 });
+
+// --- web push --------------------------------------------------------------
+
+router.get('/push/key', (_req, res) => res.json({ key: publicKey() }));
+
+router.post('/push/subscribe', requireAuth, (req, res) => {
+  const app = ['rider', 'driver', 'admin'].includes(req.body?.app) ? req.body.app : null;
+  if (!app) throw new HttpError(400, 'اپ نامعتبر است');
+  if (app === 'admin' && !req.user.is_admin) throw new HttpError(403, 'دسترسی ندارید');
+  if (!saveSubscription(req.user.id, app, req.body?.subscription)) throw new HttpError(400, 'اشتراک اعلان نامعتبر است');
+  res.json({ ok: true });
+});
+
+router.post('/push/unsubscribe', requireAuth, (req, res) => {
+  removeSubscription(req.body?.endpoint);
+  res.json({ ok: true });
+});
+
+router.post('/push/test', requireAuth, ah(async (req, res) => {
+  const app = ['rider', 'driver', 'admin'].includes(req.body?.app) ? req.body.app : 'rider';
+  const sent = await pushTo(req.user.id, app, { title: 'نِنا', body: 'اعلان‌ها فعال است ✓', tag: 'test', always: true });
+  res.json({ sent });
+}));
 
 // --- payment gateway callbacks --------------------------------------------
 

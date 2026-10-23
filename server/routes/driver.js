@@ -8,12 +8,14 @@ import { db, getSettings } from '../db.js';
 import { HttpError, ah, int, isValidNationalId, normalizeSheba, now, parseJson, toEnDigits } from '../util.js';
 import { requireAuth, requireApprovedDriver } from '../auth.js';
 import { emitAdmins } from '../realtime.js';
+import { notifyAdmins } from '../services/push.js';
 import { getDriver, driverView, updateDriverLocation } from '../services/drivers.js';
 import { acceptOffer, declineOffer, offerPayload, withdrawOffersFor } from '../services/matching.js';
 import {
   getRide, rideView, activeRideFor, markArrived, startRide, completeRide, cancelByDriver, rateRide, driverEarning,
 } from '../services/rides.js';
 import { addTx, listTx } from '../services/wallet.js';
+import { openReservations, myReservations, claimReservation, releaseReservation } from '../services/reservations.js';
 import { createPayment } from '../services/payment.js';
 
 const router = Router();
@@ -78,6 +80,7 @@ router.post('/driver/register', requireAuth, (req, res) => {
       vehicle_color = excluded.vehicle_color, vehicle_year = excluded.vehicle_year, plate = excluded.plate, sheba = excluded.sheba`)
     .run(req.user.id, nationalId, licenseNo, vehicleType, model, color, year, plate, sheba, now());
   emitAdmins('driver:registered', { user_id: req.user.id, name });
+  notifyAdmins({ title: 'درخواست رانندگی جدید', body: `${name} — ${vehicleType === 'black' ? 'نِنا بلک' : 'نِنا اکو'}`, url: '/admin/#drivers', tag: 'driver-registered' });
   res.json({ driver: driverView(getDriver(req.user.id)) });
 });
 
@@ -166,6 +169,18 @@ router.post('/driver/rides/:id/cancel', requireApprovedDriver, (req, res) => {
 });
 router.post('/driver/rides/:id/rate', requireApprovedDriver, (req, res) => {
   res.json({ ride: rideView(rateRide(driverRide(req), 'driver', req.body?.rating, req.body?.comment), 'driver') });
+});
+
+// Reservations (rides booked in advance) the driver can claim, and the ones they hold.
+router.get('/driver/reservations', requireApprovedDriver, (req, res) => {
+  res.json({ open: openReservations(req.driver), mine: myReservations(req.user.id) });
+});
+router.post('/driver/reservations/:id/claim', requireApprovedDriver, (req, res) => {
+  res.json({ ride: rideView(claimReservation(Number(req.params.id), req.driver), 'driver') });
+});
+router.post('/driver/reservations/:id/release', requireApprovedDriver, (req, res) => {
+  releaseReservation(Number(req.params.id), req.user.id);
+  res.json({ ok: true });
 });
 
 router.get('/driver/rides', requireApprovedDriver, (req, res) => {

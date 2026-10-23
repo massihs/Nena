@@ -231,6 +231,23 @@ CREATE TABLE IF NOT EXISTS surge_zones (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  app TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS push_user ON push_subscriptions(user_id, app);
+
+-- Server-side secrets (e.g. VAPID keys); never returned by any API.
+CREATE TABLE IF NOT EXISTS secrets (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -243,6 +260,15 @@ export function closeDb() {
     db.close();
   } catch { /* already closed */ }
 }
+
+// Adds a column to an existing table when an older database lacks it.
+function addColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+// Reservations: the driver who claimed a scheduled ride in advance, and reminders already sent.
+addColumn('rides', 'reserved_driver_id', 'INTEGER REFERENCES users(id)');
+addColumn('rides', 'reminders', "TEXT NOT NULL DEFAULT '[]'");
 
 let txDepth = 0;
 // Runs fn inside a transaction; nested calls join the outer transaction.
@@ -294,6 +320,12 @@ export const DEFAULT_SETTINGS = {
   referral_bonus: 50000,
   min_payout: 100000,
   support_phone: '021-00000000',
+  // Reservations (rides booked in advance)
+  reserve_min_minutes: 30,
+  reserve_max_days: 30,
+  reserve_free_cancel_minutes: 60,
+  reserve_activate_minutes: 20,
+  reserve_dispatch_minutes: 15,
 };
 
 const insertType = db.prepare(`INSERT OR IGNORE INTO ride_types

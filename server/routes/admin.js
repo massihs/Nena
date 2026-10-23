@@ -14,6 +14,8 @@ import { withdrawOffersFor } from '../services/matching.js';
 import { addTx } from '../services/wallet.js';
 import { listPlaces, savePlace, deletePlace } from '../services/placeStore.js';
 import { economics } from '../services/economics.js';
+import { notify } from '../services/push.js';
+import { toman } from '../services/text.js';
 import { surgeDetail } from '../services/pricing.js';
 
 const router = Router();
@@ -79,7 +81,10 @@ router.post('/drivers/:id/status', (req, res) => {
     .run(status, String(req.body?.reason || '') || null, status, id);
   if (status !== 'approved') withdrawOffersFor(id);
   const text = { approved: 'حساب رانندگی شما تأیید شد؛ می‌توانید آنلاین شوید 🎉', rejected: 'درخواست رانندگی شما رد شد', suspended: 'حساب رانندگی شما موقتاً تعلیق شد' }[status];
-  if (text) emitTo(id, 'notice', { text, refresh: true });
+  if (text) {
+    emitTo(id, 'notice', { text, refresh: true });
+    notify(id, 'driver', { title: 'نِنا رانندگان', body: text, tag: 'account' });
+  }
   res.json({ ok: true });
 });
 
@@ -313,7 +318,9 @@ router.post('/payouts/:id', (req, res) => {
   if (!p) throw new HttpError(404, 'درخواست یافت نشد');
   db.prepare('UPDATE payouts SET status = ?, processed_at = ? WHERE id = ?').run(status, now(), p.id);
   if (status === 'rejected') addTx(p.driver_id, p.amount, 'payout_refund', { description: 'برگشت درخواست تسویه' });
-  emitTo(p.driver_id, 'notice', { text: status === 'paid' ? 'تسویه حساب شما واریز شد' : 'درخواست تسویه شما رد شد و مبلغ به کیف پول برگشت' });
+  const payoutText = status === 'paid' ? `تسویه ${toman(p.amount)} به حساب شما واریز شد` : 'درخواست تسویه شما رد شد و مبلغ به کیف پول برگشت';
+  emitTo(p.driver_id, 'notice', { text: payoutText });
+  notify(p.driver_id, 'driver', { title: 'تسویه حساب', body: payoutText, tag: `payout-${p.id}` });
   res.json({ ok: true });
 });
 

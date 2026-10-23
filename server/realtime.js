@@ -17,6 +17,10 @@ export function initRealtime(httpServer) {
 
   io.on('connection', (socket) => {
     const user = socket.data.user;
+    // Which app this socket belongs to and whether its page is on screen (for push decisions).
+    socket.data.app = String(socket.handshake.auth?.app || '');
+    socket.data.visible = socket.handshake.auth?.visible !== false;
+    socket.on('visibility', (visible) => { socket.data.visible = !!visible; });
     socket.join(`user:${user.id}`);
     if (user.is_admin && socket.handshake.auth?.app === 'admin') socket.join('admins');
 
@@ -31,6 +35,13 @@ export function initRealtime(httpServer) {
 
 export function emitTo(userId, event, data) {
   io?.to(`user:${userId}`).emit(event, data);
+}
+
+// True when the user has this app open and visible on some device.
+export async function isVisible(userId, app) {
+  if (!io) return false;
+  const sockets = await io.in(`user:${userId}`).fetchSockets();
+  return sockets.some((s) => s.data.app === app && s.data.visible);
 }
 
 export function emitAdmins(event, data) {

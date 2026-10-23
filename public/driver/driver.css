@@ -37,3 +37,15 @@
 .plate-input input, .plate-input select { text-align: center; padding: 8px 4px; }
 .doc-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .doc-row:last-child { border-bottom: 0; }
+
+/* refreshed idle screen */
+.driver-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.driver-status .go-btn { width: 84px; height: 84px; font-size: 20px; margin: 0; flex: none; }
+.driver-status .go-btn.stop { font-size: 16px; }
+.today-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.today-cell { background: var(--soft); border: 0; border-radius: 14px; padding: 10px 6px; text-align: center; color: inherit; }
+button.today-cell { cursor: pointer; }
+.today-cell .tc-v { font-weight: 900; font-size: 17px; }
+.today-cell .tc-l { font-size: 10.5px; color: var(--muted); }
+.reserve-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border-radius: var(--radius); border: 1px solid var(--line); background: none; color: inherit; cursor: pointer; text-align: right; }
+.reserve-card:hover { background: var(--soft); }

@@ -5,6 +5,8 @@ import * as fa from '/shared/fa.js';
 import { openChat as chat } from '/shared/chat.js';
 import { openSafety as safety } from '/shared/safety.js';
 import { placeResult } from '/shared/places.js';
+import { isInstalled } from '/shared/install.js';
+import { openNotifications, openInstall } from '/shared/app-pages.js';
 
 const RIDER_REPLIES = ['دارم میام', 'کجا هستید؟', 'لطفاً چند دقیقه صبر کنید', 'جلوی در منتظرم', 'ممنون'];
 
@@ -77,6 +79,8 @@ export function openMenu(ctx) {
       listItem({ iconName: 'tag', title: 'کدهای تخفیف', onclick: go(openPromos) }),
       listItem({ iconName: 'gift', title: 'دعوت از دوستان', sub: 'هدیه برای شما و دوستتان', onclick: go(openInvite) }),
       listItem({ iconName: 'shield', title: 'ایمنی', onclick: go(openSafetySettings) }),
+      listItem({ iconName: 'bell', title: 'اعلان‌ها', sub: 'وضعیت سفر، پیام راننده و یادآوری رزرو', onclick: go(openNotifications) }),
+      isInstalled() ? null : listItem({ iconName: 'upload', title: 'نصب اپ نِنا', sub: 'افزودن به صفحه اصلی گوشی', onclick: go(openInstall) }),
       listItem({ iconName: 'user', title: 'حساب کاربری', onclick: go(openProfile) }),
       listItem({ iconName: 'help', title: 'پشتیبانی', onclick: go(openSupport) }),
       listItem({ iconName: 'car', title: 'رانندۀ نِنا شوید', sub: 'با خودروی خودتان درآمد کسب کنید', href: '/driver/' }),
@@ -139,21 +143,35 @@ function openReceipt(ctx, r) {
     h('a', { class: 'btn btn-block mt', href: `tel:${ctx.S.cfg.support_phone}` }, icon('help'), 'گزارش مشکل در این سفر'));
 }
 
-async function openScheduled(ctx) {
-  const p = page('سفرهای رزرو شده');
+export async function openScheduled(ctx) {
+  const p = page('سفرهای رزروشده', { onClose: () => import('./app.js').then((m) => m.reloadUpcoming()) });
   const render = async () => {
     const { rides } = await ctx.api.get('/rider/rides/scheduled');
-    mount(p.body, rides.length ? h('div', { class: 'list' }, rides.map((r) => listItem({
-      iconName: 'calendar', title: fa.jDateTime(r.scheduled_at), sub: `${r.type_name} • ${r.dropoff.address || ''}`,
-      end: h('button', {
-        class: 'btn btn-sm btn-danger-soft',
-        onclick: async (e) => {
-          e.stopPropagation();
-          if (!(await confirmDialog('لغو رزرو', 'این رزرو لغو شود؟', { ok: 'لغو رزرو', danger: true }))) return;
-          try { await ctx.api.post(`/rider/rides/${r.id}/cancel`, { reason: 'لغو رزرو' }); toast('رزرو لغو شد'); render(); } catch (err) { toastError(err); }
-        },
-      }, 'لغو'),
-    }))) : h('div', { class: 'empty' }, icon('calendar'), h('p', {}, 'رزرو فعالی ندارید'), h('p', { class: 'small' }, 'از صفحه اصلی گزینه «رزرو» را بزنید.')));
+    mount(p.body,
+      rides.length ? rides.map((r) => {
+        const free = Date.now() < r.free_cancel_until || !r.reserved_driver;
+        const cancel = h('button', { class: 'btn btn-sm btn-danger-soft' }, 'لغو رزرو');
+        cancel.onclick = async () => {
+          const text = free ? 'لغو این رزرو رایگان است.' : `زمان لغو رایگان گذشته است؛ هزینه لغو ${fa.toman(ctx.S.cfg.cancel_fee)} به راننده پرداخت می‌شود.`;
+          if (!(await confirmDialog('لغو رزرو', text, { ok: 'لغو رزرو', danger: true }))) return;
+          busy(cancel, async () => { await ctx.api.post(`/rider/rides/${r.id}/cancel`, { reason: 'لغو رزرو' }); toast('رزرو لغو شد'); render(); });
+        };
+        const d = r.reserved_driver;
+        return h('div', { class: 'card mb' },
+          h('div', { class: 'row between' },
+            h('div', {}, h('div', { class: 'bold', style: { fontSize: '18px' } }, `${fa.jWeekday(r.scheduled_at)} ${fa.jDateShort(r.scheduled_at)}`), h('div', { class: 'muted' }, `ساعت ${fa.jTime(r.scheduled_at)} • ${r.type_name}`)),
+            h('div', { class: 'bold' }, fa.toman(r.payable))),
+          h('div', { class: 'list mt' },
+            listItem({ iconName: 'dot', title: r.pickup.address || 'مبدأ', sub: 'مبدأ' }),
+            listItem({ iconName: 'pin', title: r.dropoff.address || 'مقصد', sub: 'مقصد' })),
+          d ? h('div', { class: 'driver-card mt card', style: { background: 'var(--soft)', boxShadow: 'none' } },
+            avatar(d.name), h('div', { class: 'grow' }, h('div', { class: 'bold' }, d.name), h('div', { class: 'small muted row gap-sm' }, ratingPill(d.rating), `${d.vehicle_model} ${d.vehicle_color}`)), plateEl(d.plate))
+            : h('div', { class: 'badge yellow mt' }, 'در انتظار پذیرش راننده — به محض پذیرش خبرتان می‌کنیم'),
+          h('div', { class: 'row between mt' },
+            h('span', { class: 'tiny muted' }, free && r.reserved_driver ? `لغو رایگان تا ساعت ${fa.jTime(r.free_cancel_until)}` : free ? 'لغو رایگان' : 'لغو با هزینه'),
+            cancel));
+      }) : h('div', { class: 'empty' }, icon('calendar'), h('h3', {}, 'رزرو فعالی ندارید'), h('p', { class: 'small' }, 'سفر فرودگاه یا جلسه مهم دارید؟ از قبل رزرو کنید.')),
+      h('button', { class: 'btn btn-primary btn-lg btn-block mt', onclick: () => { p.close(); import('./app.js').then((m) => m.startReservation()); } }, icon('plus'), 'رزرو سفر جدید'));
   };
   render().catch(toastError);
 }
@@ -197,7 +215,7 @@ export async function openWallet(ctx) {
     transactions.length ? h('div', { class: 'list' }, transactions.map(txRow)) : h('div', { class: 'empty' }, 'تراکنشی ثبت نشده است'));
 }
 
-function openPlaces(ctx) {
+export function openPlaces(ctx) {
   const p = page('مکان‌های منتخب');
   const render = () => mount(p.body,
     h('div', { class: 'list' },
@@ -310,3 +328,4 @@ function openSupport(ctx) {
     h('h3', { class: 'mt-lg' }, 'سؤالات متداول'),
     faq.map(([q, a]) => h('details', { class: 'card mt' }, h('summary', { class: 'bold', style: { cursor: 'pointer' } }, q), h('p', { class: 'muted mt' }, a))));
 }
+

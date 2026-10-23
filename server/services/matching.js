@@ -5,6 +5,8 @@ import { findAvailableDrivers } from './drivers.js';
 import { getRideType } from './pricing.js';
 import { getRide, rideView, emitRideUpdate } from './rides.js';
 import { haversineKm, etaMinutes } from './geo.js';
+import { notify } from './push.js';
+import { toman } from './text.js';
 
 // Dispatch offers a searching ride to the nearest idle driver, one at a time, until one accepts
 // or the search times out. Timers are in memory; resumeDispatch() rebuilds them after a restart.
@@ -35,6 +37,7 @@ function offerNext(rideId) {
     db.prepare(`UPDATE rides SET status = 'no_driver', offered_driver_id = NULL, offer_expires_at = NULL
       WHERE id = ? AND status = 'searching'`).run(rideId);
     emitRideUpdate(getRide(rideId));
+    notify(ride.rider_id, 'rider', { title: 'راننده‌ای پیدا نشد', body: 'همه رانندگان اطراف مشغول‌اند؛ دوباره تلاش کنید', tag: `ride-${rideId}` });
     return;
   }
 
@@ -56,7 +59,14 @@ function offerNext(rideId) {
   if (!changes) return;
   db.prepare('UPDATE drivers SET offers_received = offers_received + 1 WHERE user_id = ?').run(driver.user_id);
 
-  emitTo(driver.user_id, 'ride:offer', offerPayload(getRide(rideId), driver));
+  const payload = offerPayload(getRide(rideId), driver);
+  emitTo(driver.user_id, 'ride:offer', payload);
+  // Reaches drivers whose phone is locked or app in the background.
+  notify(driver.user_id, 'driver', {
+    title: `درخواست سفر جدید — ${toman(payload.ride.estimated_earning)}`,
+    body: `${payload.ride.type_name} • ${payload.pickup_eta_min.toLocaleString('fa-IR')} دقیقه تا مبدأ • ${payload.ride.pickup.address || ''}`,
+    tag: 'offer', urgent: true,
+  });
   timers.set(rideId, setTimeout(() => declineOffer(rideId, driver.user_id), expiresAt - now() + 500));
 }
 
@@ -98,6 +108,11 @@ export function acceptOffer(rideId, driverId) {
   });
   clearTimer(rideId);
   emitRideUpdate(ride);
+  const d = rideView(ride, 'rider').driver;
+  notify(ride.rider_id, 'rider', {
+    title: `${d.name} در راه است`, body: `${d.vehicle_model} ${d.vehicle_color} • پلاک ${d.plate.replaceAll('|', ' ')}${d.eta_min ? ` • ${d.eta_min.toLocaleString('fa-IR')} دقیقه` : ''}`,
+    tag: `ride-${ride.id}`,
+  });
   return ride;
 }
 
@@ -116,18 +131,14 @@ export function resumeDispatch() {
     db.prepare('UPDATE rides SET search_started_at = ? WHERE id = ?').run(now(), id);
     startDispatch(id);
   }
-  scheduler = setInterval(releaseScheduledRides, 15000);
+  scheduler = setInterval(() => releaseScheduledRides().catch((err) => console.error(err)), 10000);
   scheduler.unref();
 }
 
-// Scheduled rides start searching 10 minutes before pickup.
-export function releaseScheduledRides() {
-  const due = db.prepare("SELECT id FROM rides WHERE status = 'scheduled' AND scheduled_at <= ?").all(now() + 10 * 60 * 1000);
-  for (const { id } of due) {
-    db.prepare("UPDATE rides SET status = 'searching', search_started_at = ? WHERE id = ? AND status = 'scheduled'").run(now(), id);
-    emitRideUpdate(getRide(id));
-    startDispatch(id);
-  }
+// Reservations: reminders, activation of claimed rides, dispatch of unclaimed ones.
+export async function releaseScheduledRides() {
+  const { processReservations } = await import('./reservations.js');
+  processReservations();
 }
 
 export function stopAllDispatch() {

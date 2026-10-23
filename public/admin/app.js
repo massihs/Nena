@@ -4,6 +4,7 @@ import { createMap, carIcon, pinIcon } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
 import * as fa from '/shared/fa.js';
 import { categoryLabel } from '/shared/places.js';
+import { pushState, enablePush, disablePush, syncPush } from '/shared/push.js';
 import { economicsPage } from './economics.js';
 import { surgePage } from './surge.js';
 
@@ -57,6 +58,8 @@ function shell() {
   });
   socket.on('driver:registered', (d) => { toast(`درخواست رانندگی جدید: ${d.name}`); refreshCounts(); });
   refreshCounts();
+  syncPush(api);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   go(location.hash.slice(1) || 'dashboard');
   window.addEventListener('hashchange', () => go(location.hash.slice(1)));
 }
@@ -277,7 +280,8 @@ async function rides(filter = '') {
     table(['#', 'زمان', 'سرویس', 'مسافر', 'راننده', 'مسیر', 'مسافت', 'کرایه', 'پرداخت', 'وضعیت'],
       list.map((r) => h('tr', { class: 'clickable', onclick: () => rideDetail(r.id) },
         h('td', {}, fa.num(r.id)), h('td', {}, fa.jDateTime(r.created_at)), h('td', {}, r.type_name),
-        h('td', {}, r.rider.name || fa.faDigits(r.rider.phone)), h('td', {}, r.driver?.name || '—'),
+        h('td', {}, r.rider.name || fa.faDigits(r.rider.phone)),
+        h('td', {}, r.driver?.name || (r.reserved_driver ? `رزرو: ${r.reserved_driver.name}` : '—'), r.scheduled_at && r.status === 'scheduled' ? h('div', { class: 'tiny muted' }, fa.jDateTime(r.scheduled_at)) : null),
         h('td', { style: { maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis' } }, `${(r.pickup.address || '').split('،')[0]} ← ${(r.dropoff.address || '').split('،')[0]}`),
         h('td', {}, fa.km(r.distance_km)), h('td', {}, fa.toman(r.fare_final ?? r.fare_estimate)),
         h('td', {}, r.payment_method === 'wallet' ? 'کیف پول' : 'نقدی'), h('td', {}, statusBadge(r.status))))));
@@ -494,6 +498,13 @@ const SETTING_GROUPS = [
     ['free_wait_minutes', 'انتظار رایگان در مبدأ', 'دقیقه؛ پس از آن هزینه توقف هر سرویس محاسبه می‌شود'],
     ['no_show_wait_minutes', 'انتظار لازم برای «مسافر نیامد»', 'دقیقه'],
   ]],
+  ['رزرو سفر از قبل', [
+    ['reserve_min_minutes', 'حداقل فاصله تا زمان سفر', 'دقیقه؛ رزرو زودتر از این پذیرفته نمی‌شود'],
+    ['reserve_max_days', 'حداکثر بازه رزرو', 'روز آینده'],
+    ['reserve_free_cancel_minutes', 'لغو رایگان تا', 'دقیقه قبل از سفر (وقتی راننده رزرو را پذیرفته)'],
+    ['reserve_activate_minutes', 'شروع سفر رزرو برای راننده', 'دقیقه قبل؛ راننده رزرو به سمت مسافر حرکت می‌کند'],
+    ['reserve_dispatch_minutes', 'جستجوی راننده برای رزرو بی‌راننده', 'دقیقه قبل از زمان سفر'],
+  ]],
   ['تخصیص سفر', [
     ['offer_timeout_seconds', 'مهلت پاسخ راننده', 'ثانیه؛ پس از آن درخواست به راننده بعدی می‌رود'],
     ['search_radius_km', 'شعاع جستجوی راننده', 'کیلومتر'],
@@ -520,6 +531,21 @@ async function downloadBackup(btn) {
     URL.revokeObjectURL(a.href);
     toast('نسخه پشتیبان دانلود شد', 'success');
   });
+}
+
+function pushCard() {
+  const box = h('div', { class: 'card' }, h('h3', {}, 'اعلان‌های مدیریت'));
+  const draw = async () => {
+    const state = await pushState();
+    const btn = h('button', { class: 'btn btn-block mt' }, state === 'on' ? 'خاموش کردن' : 'فعال‌سازی اعلان روی این دستگاه');
+    btn.onclick = () => busy(btn, async () => { await (state === 'on' ? disablePush(api) : enablePush(api)); toast(state === 'on' ? 'اعلان‌ها خاموش شد' : 'اعلان‌ها فعال شد', 'success'); draw(); });
+    mount(box, h('h3', {}, 'اعلان‌های مدیریت'),
+      h('p', { class: 'muted small' }, 'هشدارهای اضطراری (SOS) و درخواست‌های رانندگی جدید، حتی وقتی پنل بسته است.'),
+      h('span', { class: `badge ${state === 'on' ? 'green' : ''}` }, { on: 'فعال', off: 'غیرفعال', denied: 'مسدود در مرورگر', unsupported: 'پشتیبانی نمی‌شود', 'ios-install': 'نیاز به نصب' }[state]),
+      ['on', 'off'].includes(state) ? btn : null);
+  };
+  draw().catch(() => {});
+  return box;
 }
 
 function storageCard(st) {
@@ -558,7 +584,7 @@ async function settings() {
   mount(S.main,
     h('h1', {}, 'تنظیمات'),
     h('p', { class: 'muted small' }, 'کمیسیون و کرایه هر سرویس در «سرویس‌ها و تعرفه‌ها» و ضرایب در «افزایش قیمت» تنظیم می‌شوند.'),
-    h('div', { class: 'grid-cards' }, storageCard(storage), SETTING_GROUPS.map(([title, rows]) => h('div', { class: 'card' },
+    h('div', { class: 'grid-cards' }, storageCard(storage), pushCard(), SETTING_GROUPS.map(([title, rows]) => h('div', { class: 'card' },
       h('h3', {}, title),
       rows.map(([k, label, hint]) => h('div', { class: 'setting-row' }, h('div', {}, h('div', { class: 'bold' }, label), h('span', { class: 'hint' }, hint)), control(k)))))),
     save);

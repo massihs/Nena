@@ -46,7 +46,14 @@ export function createApi(app) {
     put: (p, b = {}) => request('PUT', p, b),
     patch: (p, b = {}) => request('PATCH', p, b),
     del: (p) => request('DELETE', p),
-    connect: () => window.io({ auth: { token, app }, transports: ['websocket', 'polling'] }),
+    // The server skips push notifications while this app is visible on screen.
+    connect: () => {
+      const visible = () => document.visibilityState === 'visible';
+      const socket = window.io({ auth: { token, app, visible: visible() }, transports: ['websocket', 'polling'] });
+      document.addEventListener('visibilitychange', () => socket.emit('visibility', visible()));
+      socket.on('connect', () => socket.emit('visibility', visible()));
+      return socket;
+    },
     store,
   };
 }

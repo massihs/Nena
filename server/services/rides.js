@@ -9,6 +9,8 @@ import { driverRating, getDriver } from './drivers.js';
 import { addTx } from './wallet.js';
 import { startDispatch, stopDispatch } from './matching.js';
 import { haversineKm, etaMinutes } from './geo.js';
+import { notify } from './push.js';
+import { toman } from './text.js';
 
 export const ACTIVE_STATUSES = ['searching', 'accepted', 'arrived', 'in_progress'];
 
@@ -86,6 +88,16 @@ export function rideView(ride, viewer) {
     }
   }
 
+  if (ride.reserved_driver_id && ride.status === 'scheduled' && viewer !== 'public') {
+    const u = db.prepare('SELECT id, name FROM users WHERE id = ?').get(ride.reserved_driver_id);
+    const d = getDriver(ride.reserved_driver_id);
+    view.reserved_driver = {
+      id: u.id, name: u.name, rating: driverRating(d), vehicle_type: d.vehicle_type, vehicle_model: d.vehicle_model,
+      vehicle_color: d.vehicle_color, plate: d.plate,
+    };
+  }
+  view.free_cancel_until = ride.scheduled_at ? ride.scheduled_at - s.reserve_free_cancel_minutes * 60 * 1000 : null;
+
   if (viewer === 'rider') {
     view.pin = ride.pin;
     view.share_token = ride.share_token;
@@ -156,8 +168,9 @@ export async function createRide(rider, body) {
   let scheduledAt = null;
   if (body.scheduled_at) {
     scheduledAt = Number(body.scheduled_at);
-    if (!Number.isFinite(scheduledAt) || scheduledAt < now() + 14 * 60 * 1000 || scheduledAt > now() + 7 * 24 * 3600 * 1000) {
-      throw new HttpError(400, 'زمان رزرو باید بین ۱۵ دقیقه تا ۷ روز آینده باشد');
+    const s = getSettings();
+    if (!Number.isFinite(scheduledAt) || scheduledAt < now() + (s.reserve_min_minutes - 1) * 60 * 1000 || scheduledAt > now() + s.reserve_max_days * 24 * 3600 * 1000) {
+      throw new HttpError(400, `زمان رزرو باید بین ${s.reserve_min_minutes.toLocaleString('fa-IR')} دقیقه تا ${s.reserve_max_days.toLocaleString('fa-IR')} روز آینده باشد`);
     }
   }
 
@@ -197,9 +210,10 @@ function freeDriver(driverId) {
 
 function chargeCancelFee(ride, reasonText) {
   const fee = getSettings().cancel_fee;
-  if (!fee || !ride.driver_id) return 0;
+  const driverId = ride.driver_id || ride.reserved_driver_id;
+  if (!fee || !driverId) return 0;
   addTx(ride.rider_id, -fee, 'cancel_fee', { rideId: ride.id, description: reasonText });
-  addTx(ride.driver_id, fee, 'cancel_compensation', { rideId: ride.id, description: 'جبران لغو سفر توسط مسافر' });
+  addTx(driverId, fee, 'cancel_compensation', { rideId: ride.id, description: 'جبران لغو سفر توسط مسافر' });
   return fee;
 }
 
@@ -208,7 +222,11 @@ export function cancelByRider(ride, reason, { by = 'rider', waiveFee = false } =
     throw new HttpError(400, 'این سفر قابل لغو نیست');
   }
   const s = getSettings();
-  const late = !waiveFee && ((ride.status === 'accepted' && now() - ride.accepted_at > s.free_cancel_seconds * 1000) || ride.status === 'arrived');
+  // A claimed reservation is free to cancel until reserve_free_cancel_minutes before pickup.
+  const lateReservation = ride.status === 'scheduled' && ride.reserved_driver_id
+    && ride.scheduled_at - now() < s.reserve_free_cancel_minutes * 60 * 1000;
+  const late = !waiveFee && ((ride.status === 'accepted' && now() - ride.accepted_at > s.free_cancel_seconds * 1000)
+    || ride.status === 'arrived' || lateReservation);
   const offered = ride.offered_driver_id;
 
   const updated = tx(() => {
@@ -221,6 +239,15 @@ export function cancelByRider(ride, reason, { by = 'rider', waiveFee = false } =
   stopDispatch(ride.id);
   if (offered) emitTo(offered, 'ride:offer_cancel', { ride_id: ride.id });
   emitRideUpdate(updated);
+  const driverToTell = ride.driver_id || ride.reserved_driver_id;
+  if (driverToTell) {
+    if (!ride.driver_id) emitTo(driverToTell, 'reservation:update', { id: ride.id });
+    notify(driverToTell, 'driver', {
+      title: by === 'admin' ? 'سفر توسط پشتیبانی لغو شد' : ride.status === 'scheduled' ? 'مسافر رزرو را لغو کرد' : 'مسافر سفر را لغو کرد',
+      body: updated.cancel_fee ? `${toman(updated.cancel_fee)} جبران به کیف پول شما اضافه شد` : (ride.pickup_address || ''),
+      tag: `ride-${ride.id}`,
+    });
+  }
   return updated;
 }
 
@@ -241,6 +268,7 @@ export function cancelByDriver(ride, driverId, reason) {
       return getRide(ride.id);
     });
     emitRideUpdate(updated);
+    notify(ride.rider_id, 'rider', { title: 'سفر لغو شد', body: `راننده به دلیل عدم حضور شما سفر را لغو کرد${fee ? ` — هزینه لغو ${toman(fee)}` : ''}`, tag: `ride-${ride.id}` });
     return updated;
   }
 
@@ -255,6 +283,7 @@ export function cancelByDriver(ride, driverId, reason) {
   emitTo(driverId, 'ride:update', { ...rideView(ride, 'driver'), status: 'cancelled', cancelled_by: 'driver' });
   emitRideUpdate(updated);
   emitTo(ride.rider_id, 'notice', { text: 'راننده سفر را لغو کرد؛ در حال یافتن راننده جدید هستیم' });
+  notify(ride.rider_id, 'rider', { title: 'تغییر راننده', body: 'راننده سفر را لغو کرد؛ در حال یافتن راننده جدید هستیم', tag: `ride-${ride.id}` });
   startDispatch(ride.id);
   return updated;
 }
@@ -269,6 +298,7 @@ export function markArrived(ride, driverId) {
   db.prepare("UPDATE rides SET status = 'arrived', arrived_at = ? WHERE id = ?").run(now(), ride.id);
   const updated = getRide(ride.id);
   emitRideUpdate(updated);
+  notify(ride.rider_id, 'rider', { title: 'راننده رسید', body: 'راننده در مبدأ منتظر شماست', tag: `ride-${ride.id}`, urgent: true });
   return updated;
 }
 
@@ -326,6 +356,10 @@ export function completeRide(ride, driverId) {
     return getRide(ride.id);
   });
   emitRideUpdate(updated);
+  notify(ride.rider_id, 'rider', {
+    title: 'به مقصد رسیدید', body: `مبلغ سفر: ${toman(updated.fare_final - updated.discount)}${updated.paid_cash ? ` (نقدی ${toman(updated.paid_cash)})` : ''} — به راننده امتیاز دهید`,
+    tag: `ride-${ride.id}`,
+  });
   return updated;
 }
 
@@ -372,6 +406,7 @@ export function tipRide(ride, riderId, amount) {
     return getRide(ride.id);
   });
   emitTo(ride.driver_id, 'notice', { text: `مسافر ${amount.toLocaleString('fa-IR')} تومان انعام داد 🎉` });
+  notify(ride.driver_id, 'driver', { title: 'انعام دریافت کردید 🎉', body: `${toman(amount)} برای سفر #${ride.id.toLocaleString('fa-IR')}`, tag: `tip-${ride.id}` });
   return updated;
 }
 

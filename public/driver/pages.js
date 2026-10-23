@@ -1,5 +1,9 @@
 import { h, mount, icon, toast, toastError, busy, listItem, page, avatar, ratingPill, plateEl, vehicleArt, confirmDialog } from '/shared/ui.js';
 import * as fa from '/shared/fa.js';
+import { isInstalled } from '/shared/install.js';
+import { openNotifications, openInstall } from '/shared/app-pages.js';
+
+export const DRIVER_PUSH_LINES = ['درخواست سفر جدید (با صدا و لرزش)', 'پیام مسافر و لغو سفر', 'رزروهای شما و یادآوری زمان سفر', 'انعام، تسویه و وضعیت حساب'];
 
 const LETTERS = 'ب ج د س ص ط ق ل م ن و ه ی ع پ ت ث ز ژ ش ف ک گ الف'.split(' ');
 const DOCS = {
@@ -161,10 +165,13 @@ export function openMenu(ctx) {
       h('div', {}, h('div', { class: 'bold' }, S.user.name), h('div', { class: 'row gap-sm small muted' }, ratingPill(S.driver.rating), `${fa.num(S.driver.rating_count)} امتیاز`))),
     h('div', { class: 'list' },
       listItem({ iconName: 'chart', title: 'درآمد', onclick: go(openEarnings) }),
+      listItem({ iconName: 'calendar', title: 'رزروها', sub: 'سفرهای از پیش رزروشده را بپذیرید', onclick: go(openReservations) }),
       listItem({ iconName: 'history', title: 'سفرهای من', onclick: go(openTrips) }),
       listItem({ iconName: 'wallet', title: 'کیف پول و تسویه', onclick: go(openWallet) }),
       listItem({ iconName: 'star', title: 'امتیاز و عملکرد', onclick: go(openPerformance) }),
       listItem({ iconName: 'car', title: 'خودرو و مدارک', onclick: go(openVehicle) }),
+      listItem({ iconName: 'bell', title: 'اعلان‌ها', sub: 'درخواست سفر حتی وقتی صفحه خاموش است', onclick: go((c) => openNotifications(c, { lines: DRIVER_PUSH_LINES })) }),
+      isInstalled() ? null : listItem({ iconName: 'upload', title: 'نصب اپ رانندگان', onclick: go(openInstall) }),
       listItem({ iconName: 'help', title: 'پشتیبانی رانندگان', onclick: go(openSupport) }),
       listItem({ iconName: 'user', title: 'اپ مسافر', href: '/rider/' }),
       listItem({ iconName: 'logout', title: 'خروج', onclick: async () => { if (await confirmDialog('خروج', 'از حساب خارج می‌شوید و آفلاین خواهید شد.', { ok: 'خروج', danger: true })) ctx.logout(); } })));
@@ -302,4 +309,53 @@ function openSupport(ctx) {
   mount(p.body,
     h('a', { class: 'btn btn-primary btn-lg btn-block', href: `tel:${ctx.S.cfg.support_phone}` }, icon('phone'), 'تماس با پشتیبانی'),
     faq.map(([q, a]) => h('details', { class: 'card mt' }, h('summary', { class: 'bold', style: { cursor: 'pointer' } }, q), h('p', { class: 'muted mt' }, a))));
+}
+
+// ---------------------------------------------------------------------------
+// reservations (rides booked in advance)
+
+export function openReservations(ctx, tab = 'open') {
+  const p = page('رزروها');
+  const tabs = h('div', { class: 'tabs' });
+  const body = h('div', { class: 'mt' });
+  const drawTabs = (counts = {}) => mount(tabs, [['open', `رزروهای باز${counts.open != null ? ` (${fa.num(counts.open)})` : ''}`], ['mine', `رزروهای من${counts.mine != null ? ` (${fa.num(counts.mine)})` : ''}`]]
+    .map(([k, l]) => h('button', { class: tab === k ? 'active' : '', onclick: () => { tab = k; render(); } }, l)));
+  const card = (r, mine) => {
+    const btn = h('button', { class: `btn btn-sm ${mine ? 'btn-danger-soft' : 'btn-accent'}` }, mine ? 'انصراف' : 'پذیرش رزرو');
+    btn.onclick = async () => {
+      if (mine && !(await confirmDialog('انصراف از رزرو', 'رزرو به رانندگان دیگر سپرده می‌شود. انصراف‌های مکرر بر امتیاز شما اثر دارد.', { ok: 'انصراف', danger: true }))) return;
+      busy(btn, async () => {
+        await ctx.api.post(`/driver/reservations/${r.id}/${mine ? 'release' : 'claim'}`);
+        toast(mine ? 'از رزرو انصراف دادید' : `رزرو ${fa.jWeekday(r.scheduled_at)} ساعت ${fa.jTime(r.scheduled_at)} برای شما ثبت شد`, mine ? '' : 'success');
+        render();
+        ctx.refreshIdle?.();
+      });
+    };
+    return h('div', { class: 'card mb' },
+      h('div', { class: 'row between' },
+        h('div', {}, h('div', { class: 'bold', style: { fontSize: '18px' } }, `${fa.jWeekday(r.scheduled_at)} ${fa.jDateShort(r.scheduled_at)}`),
+          h('div', { class: 'muted small' }, `ساعت ${fa.jTime(r.scheduled_at)} • ${r.type_name}${r.pickup_distance_km != null ? ` • ${fa.km(r.pickup_distance_km)} از شما` : ''}`)),
+        h('div', { style: { textAlign: 'left' } }, h('div', { class: 'bold', style: { color: 'var(--accent)' } }, fa.toman(r.estimated_earning)), h('div', { class: 'tiny muted' }, 'درآمد شما'))),
+      h('div', { class: 'list mt' },
+        listItem({ iconName: 'dot', title: r.pickup.address || 'مبدأ', sub: 'مبدأ' }),
+        listItem({ iconName: 'pin', title: r.dropoff.address || 'مقصد', sub: `${fa.km(r.distance_km)} • حدود ${fa.minutes(r.duration_min)}` })),
+      h('div', { class: 'row between mt' }, h('span', { class: 'small row gap-sm' }, ratingPill(r.rider.rating), r.rider.name || 'مسافر'), btn));
+  };
+  async function render() {
+    drawTabs();
+    mount(body, h('div', { class: 'empty' }, h('span', { class: 'spinner' })));
+    try {
+      const { open, mine } = await ctx.api.get('/driver/reservations');
+      drawTabs({ open: open.length, mine: mine.length });
+      const list = tab === 'open' ? open : mine;
+      mount(body,
+        tab === 'mine' && mine.length ? h('div', { class: 'policy mb' },
+          h('div', {}, icon('clock'), 'کمی قبل از زمان سفر، سفر خودکار برای شما شروع می‌شود؛ در آن زمان آنلاین و آزاد باشید.'),
+          h('div', {}, icon('bell'), 'یک ساعت قبل یادآوری دریافت می‌کنید.')) : null,
+        list.length ? list.map((r) => card(r, tab === 'mine')) : h('div', { class: 'empty' }, icon('calendar'),
+          h('p', {}, tab === 'open' ? 'فعلاً رزرو بازی در نزدیکی شما نیست' : 'رزروی ندارید؛ از «رزروهای باز» یکی را بپذیرید')));
+    } catch (err) { mount(body, h('div', { class: 'empty' }, err.message)); }
+  }
+  mount(p.body, tabs, body);
+  render();
 }

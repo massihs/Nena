@@ -1,13 +1,15 @@
 import { createApi } from '/shared/api.js';
 import {
   h, mount, icon, toast, toastError, modal, confirmDialog, busy, ratingPill, starInput, plateEl, avatar, listItem,
-  trackSheetHeight, debounce, shareLink, vehicleArt, notify,
+  debounce, shareLink, vehicleArt, notify,
 } from '/shared/ui.js';
 import { createMap, carIcon, setHeading, pinIcon, meIcon, animateTo, routeLayer, fitTo, getPosition, moveTo } from '/shared/map.js';
 import { renderLogin } from '/shared/login.js';
 import { placeResult } from '/shared/places.js';
 import * as fa from '/shared/fa.js';
-import { openMenu, openChat, openSafety, searchPlace, openWallet } from './pages.js';
+import { draggableSheet } from '/shared/sheet.js';
+import { pushState, enablePush, syncPush } from '/shared/push.js';
+import { openMenu, openChat, openSafety, searchPlace, openWallet, openScheduled, openPlaces } from './pages.js';
 
 const L = window.L;
 const api = createApi('rider');
@@ -18,10 +20,22 @@ export const S = {
   cfg: null, user: null, map: null, me: null, socket: null,
   pickup: null, dropoff: null, stops: [],
   estimate: null, type: 'eco', payment: 'cash', promo: '', scheduledAt: null, notes: '', recipient: { name: '', phone: '' },
-  ride: null, view: null, unread: 0, places: [], recents: [], types: [],
+  ride: null, view: null, unread: 0, places: [], recents: [], types: [], upcoming: [],
 };
 const layers = { nearby: null, route: null, markers: null, driver: null, me: null };
-let sheet, centerPin;
+let sheet, sheetBox, sheetCtl, centerPin;
+
+// Switches the sheet to another screen; content animates in only when the screen changes.
+function enter(view) {
+  const changed = S.view !== view;
+  S.view = view;
+  if (!changed) return;
+  sheetCtl?.open();
+  sheetBox.scrollTop = 0;
+  sheet.classList.remove('enter');
+  void sheet.offsetWidth;
+  sheet.classList.add('enter');
+}
 
 // ---------------------------------------------------------------------------
 // boot
@@ -63,6 +77,12 @@ async function start() {
   }
   await syncActiveRide();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  syncPush(api);
+  // Landing page "book for later" link.
+  if (location.hash === '#reserve' && S.view === 'home') {
+    history.replaceState(null, '', location.pathname);
+    startReservation();
+  }
 }
 
 export async function refreshUser() {
@@ -72,10 +92,11 @@ export async function refreshUser() {
 
 async function loadPlaces() {
   try {
-    const [p, r, t] = await Promise.all([api.get('/rider/places'), api.get('/rider/recent-destinations'), api.get('/rider/ride-types')]);
+    const [p, r, t, u] = await Promise.all([api.get('/rider/places'), api.get('/rider/recent-destinations'), api.get('/rider/ride-types'), api.get('/rider/rides/scheduled')]);
     S.places = p.places;
     S.recents = r.places;
     S.types = t.ride_types;
+    S.upcoming = u.rides;
     if (S.view === 'home') showHome();
   } catch { /* non-critical */ }
 }
@@ -110,7 +131,9 @@ function askName() {
 }
 
 function buildShell() {
-  sheet = h('section', { class: 'sheet', id: 'sheet' });
+  sheet = h('div', { class: 'sheet-body' });
+  const grip = h('div', { class: 'sheet-grip', 'aria-label': 'جابجایی پنل' });
+  sheetBox = h('section', { class: 'sheet', id: 'sheet' }, grip, sheet);
   centerPin = h('div', { class: 'center-pin hidden' }, h('div', { class: 'cp-head' }), h('div', { class: 'cp-stick' }));
   const menuBtn = h('button', { class: 'btn btn-icon', 'aria-label': 'منو', onclick: () => openMenu(ctx) }, icon('menu'));
   menuBtn.id = 'menuBtn';
@@ -119,8 +142,8 @@ function buildShell() {
     h('div', { class: 'topbar' }, menuBtn, h('div', { class: 'brand brand-pill' }, 'نِنا')),
     centerPin,
     h('div', { class: 'map-fabs' }, h('button', { class: 'btn btn-icon', 'aria-label': 'موقعیت من', onclick: () => locate(false, true) }, icon('locate'))),
-    sheet));
-  trackSheetHeight(sheet);
+    sheetBox));
+  sheetCtl = draggableSheet(sheetBox, grip);
   S.map = createMap(document.getElementById('map'), S.cfg);
   layers.nearby = L.layerGroup().addTo(S.map);
   layers.markers = L.layerGroup().addTo(S.map);
@@ -172,6 +195,12 @@ function connectSocket() {
   S.socket = api.connect();
   S.socket.on('connect', () => { if (S.view) syncActiveRide(); });
   S.socket.on('ride:update', (ride) => {
+    if (ride.status === 'scheduled' || (ride.scheduled_at && ride.status === 'cancelled' && !S.ride)) {
+      const before = S.upcoming.find((r) => r.id === ride.id);
+      if (ride.reserved_driver && !before?.reserved_driver) toast(`${ride.reserved_driver.name} رزرو ${fa.jTime(ride.scheduled_at)} را پذیرفت`, 'success');
+      reloadUpcoming();
+      return;
+    }
     if (S.ride && ride.id !== S.ride.id && ride.status !== 'searching') return;
     const prev = S.ride?.status;
     setRide(ride);
@@ -245,12 +274,11 @@ const greeting = () => {
 };
 
 export function showHome() {
-  S.view = 'home';
+  enter('home');
   S.ride = null;
   S.dropoff = null;
   S.stops = [];
-  S.scheduledAt = null;
-  sheet.classList.remove('full');
+  sheetBox.classList.remove('full');
   setCenterPin(false);
   clearRoute();
   refreshNearby();
@@ -258,29 +286,61 @@ export function showHome() {
   const home = S.places.find((p) => p.label === 'home');
   const work = S.places.find((p) => p.label === 'work');
   const goTo = (p) => { S.dropoff = { lat: p.lat, lng: p.lng, address: p.address || p.title }; ensurePickupThen(showOptions); };
-
   const firstName = (S.user.name || '').split(' ')[0];
+
+  const placeCard = (ic, title, sub, onclick) => h('button', { class: 'place-card', onclick },
+    h('span', { class: 'pc-ic' }, icon(ic)), h('span', {}, h('div', { class: 'pc-t' }, title), sub ? h('div', { class: 'pc-s' }, sub) : null));
+
+  const next = S.upcoming[0];
+  const calendar = () => {
+    const d = new Date(Date.now() + 86400000);
+    return h('span', { class: 'calendar-art' }, h('b', {}, fa.jWeekday(d)), h('span', {}, fa.faDigits(new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', day: 'numeric' }).format(d))));
+  };
+
   mount(sheet,
-    h('h3', {}, `${greeting()}${firstName ? `، ${firstName}` : ''}`),
-    h('button', { class: 'where-to mt', onclick: () => showSearch('dropoff') }, icon('search'), 'کجا می‌روید؟',
-      h('span', { class: 'spacer' }),
-      h('span', { class: 'chip', onclick: (e) => { e.stopPropagation(); pickSchedule(() => showSearch('dropoff')); } }, icon('clock'), 'رزرو')),
-    h('div', { class: 'chips mt' },
-      h('button', { class: 'chip', onclick: () => (home ? goTo(home) : addPlace('home')) }, icon('home'), home ? 'خانه' : 'افزودن خانه'),
-      h('button', { class: 'chip', onclick: () => (work ? goTo(work) : addPlace('work')) }, icon('work'), work ? 'محل کار' : 'افزودن محل کار'),
-      ...S.places.filter((p) => p.label === 'other').map((p) => h('button', { class: 'chip', onclick: () => goTo(p) }, icon('star'), p.title))),
-    S.recents.length
-      ? h('div', { class: 'list mt' }, S.recents.map((r) => listItem({ iconName: 'clock', title: shortAddr(r.address), sub: r.address, onclick: () => goTo(r) })))
-      : null,
-    h('div', { class: 'divider' }),
-    S.types.length ? h('div', { class: 'bold' }, 'سرویس‌های نِنا') : null,
-    h('div', { class: 'service-tiles mt' },
-      S.types.map((t) => [t.key, t.name, t.icon, t.description]).map(([k, label, art, desc]) =>
-        h('button', {
-          class: 'card service-tile',
-          onclick: () => { S.type = k; showSearch('dropoff'); },
-        }, h('div', { class: 'st-art' }, vehicleArt(art)), h('div', { class: 'bold' }, label), h('div', { class: 'tiny muted' }, desc)))),
-  );
+    h('div', { class: 'row between' },
+      h('h2', { style: { margin: 0 } }, `${greeting()}${firstName ? `، ${firstName}` : ''}`),
+      S.user.wallet ? h('button', { class: 'chip', onclick: () => openWallet(ctx) }, icon('wallet'), fa.tomanShort(S.user.wallet)) : null),
+    h('div', { class: 'hero-search mt' },
+      h('button', { class: 'hs-main', onclick: () => { S.scheduledAt = null; showSearch('dropoff'); } }, icon('search'), 'کجا می‌روید؟'),
+      h('button', { class: 'hs-when', onclick: () => pickSchedule(() => showSearch('dropoff')) }, icon('clock'), S.scheduledAt ? fa.jDateTime(S.scheduledAt) : 'همین حالا', h('span', { 'aria-hidden': 'true' }, '▾'))),
+    next ? upcomingCard(next) : null,
+    h('div', { class: 'section-head' }, h('h4', {}, 'سرویس‌ها')),
+    h('div', { class: 'tile-grid' },
+      S.types.map((t) => h('button', { class: `tile ${t.key === 'black' ? 'dark' : ''}`, onclick: () => { S.type = t.key; S.scheduledAt = null; showSearch('dropoff'); } },
+        t.key === 'black' ? h('span', { class: 't-badge' }, 'لوکس') : null,
+        h('span', { class: 't-art' }, vehicleArt(t.icon)), h('span', { class: 't-name' }, t.name), h('span', { class: 't-sub' }, t.key === 'black' ? 'سدان مشکی' : 'به‌صرفه'))),
+      h('button', { class: 'tile', onclick: () => pickSchedule(() => showSearch('dropoff')) },
+        h('span', { class: 't-art' }, calendar()), h('span', { class: 't-name' }, 'رزرو'), h('span', { class: 't-sub' }, 'از قبل برنامه‌ریزی کنید'))),
+    h('div', { class: 'section-head' }, h('h4', {}, 'مکان‌های من'), h('button', { onclick: () => openPlaces(ctx) }, 'مدیریت')),
+    h('div', { class: 'place-row' },
+      placeCard('home', home ? 'خانه' : 'افزودن خانه', home?.address, () => (home ? goTo(home) : addPlace('home'))),
+      placeCard('work', work ? 'محل کار' : 'افزودن محل کار', work?.address, () => (work ? goTo(work) : addPlace('work'))),
+      S.places.filter((p) => p.label === 'other').map((p) => placeCard('star', p.title, p.address, () => goTo(p)))),
+    S.recents.length ? [
+      h('div', { class: 'section-head' }, h('h4', {}, 'مقصدهای اخیر')),
+      h('div', { class: 'list' }, S.recents.slice(0, 3).map((r) => listItem({ iconName: 'clock', title: shortAddr(r.address), sub: r.address, onclick: () => goTo(r) }))),
+    ] : null);
+}
+
+function upcomingCard(r) {
+  const tomorrow = fa.jDateShort(Date.now() + 86400000) === fa.jDateShort(r.scheduled_at);
+  const today = fa.jDateShort(Date.now()) === fa.jDateShort(r.scheduled_at);
+  return h('button', { class: 'upcoming', onclick: () => openScheduled(ctx) },
+    h('span', { class: 'u-when' }, h('div', { class: 'u-day' }, today ? 'امروز' : tomorrow ? 'فردا' : `${fa.jWeekday(r.scheduled_at)} ${fa.jDateShort(r.scheduled_at)}`), h('div', { class: 'u-time' }, fa.jTime(r.scheduled_at))),
+    h('span', { class: 'u-body' },
+      h('div', { class: 'u-title' }, `سفر رزروی به ${shortAddr(r.dropoff.address) || 'مقصد'}`),
+      h('div', { class: 'u-sub' }, r.reserved_driver ? `راننده: ${r.reserved_driver.name} • ${r.reserved_driver.vehicle_model}` : `${r.type_name} • در انتظار پذیرش راننده`)),
+    icon('forward'));
+}
+
+// Entry point for "book a ride in advance" from anywhere in the app.
+export function startReservation() {
+  pickSchedule(() => showSearch('dropoff'));
+}
+
+export function reloadUpcoming() {
+  api.get('/rider/rides/scheduled').then(({ rides }) => { S.upcoming = rides; if (S.view === 'home') showHome(); }).catch(() => {});
 }
 
 function ensurePickupThen(fn) {
@@ -301,10 +361,10 @@ async function addPlace(label) {
 
 // Search screen with origin, optional stops and destination.
 export function showSearch(focus = 'dropoff') {
-  S.view = 'search';
+  enter('search');
   setCenterPin(false);
   clearRoute();
-  sheet.classList.add('full');
+  sheetBox.classList.add('full');
 
   const fields = [{ key: 'pickup' }, ...S.stops.map((_, i) => ({ key: 'stop', i })), { key: 'dropoff' }];
   const getVal = (f) => (f.key === 'stop' ? S.stops[f.i] : S[f.key]);
@@ -349,7 +409,7 @@ export function showSearch(focus = 'dropoff') {
     inputs.get(active).value = place.address;
     const next = fields.find((f) => !getVal(f));
     if (!next) {
-      sheet.classList.remove('full');
+      sheetBox.classList.remove('full');
       return showOptions();
     }
     activate(next);
@@ -381,7 +441,7 @@ export function showSearch(focus = 'dropoff') {
 
   mount(sheet,
     h('div', { class: 'row' },
-      h('button', { class: 'btn btn-icon flat', 'aria-label': 'بازگشت', onclick: () => { sheet.classList.remove('full'); showHome(); } }, icon('back')),
+      h('button', { class: 'btn btn-icon flat', 'aria-label': 'بازگشت', onclick: () => { sheetBox.classList.remove('full'); showHome(); } }, icon('back')),
       h('h3', { class: 'grow', style: { margin: 0 } }, S.scheduledAt ? `رزرو برای ${fa.jDateTime(S.scheduledAt)}` : 'مسیر سفر'),
       S.stops.length < 2 ? h('button', { class: 'btn btn-sm', onclick: () => { S.stops.push(null); showSearch('stop'); } }, icon('plus'), 'توقف') : null),
     h('div', { class: 'mt' }, box),
@@ -390,8 +450,8 @@ export function showSearch(focus = 'dropoff') {
 }
 
 function showPickOnMap(field) {
-  S.view = 'pick';
-  sheet.classList.remove('full');
+  enter('pick');
+  sheetBox.classList.remove('full');
   clearRoute();
   setCenterPin(true);
   const current = field.key === 'stop' ? S.stops[field.i] : S[field.key];
@@ -430,10 +490,14 @@ function showPickOnMap(field) {
 
 // Ride options with prices.
 export async function showOptions() {
-  S.view = 'options';
+  enter('options');
   setCenterPin(false);
-  sheet.classList.remove('full');
-  mount(sheet, h('div', { class: 'empty' }, h('span', { class: 'spinner' }), h('p', { class: 'mt' }, 'در حال محاسبه کرایه...')));
+  sheetBox.classList.remove('full');
+  mount(sheet, h('div', { class: 'skeleton', style: { height: '22px', width: '45%' } }),
+    [0, 1].map(() => h('div', { class: 'sk-row' }, h('div', { class: 'skeleton', style: { width: '64px', height: '44px' } }),
+      h('div', { class: 'grow col gap-sm' }, h('div', { class: 'skeleton', style: { height: '14px', width: '60%' } }), h('div', { class: 'skeleton', style: { height: '12px', width: '40%' } })),
+      h('div', { class: 'skeleton', style: { width: '80px', height: '18px' } }))),
+    h('div', { class: 'skeleton mt', style: { height: '56px' } }));
   drawTrip({ pickup: S.pickup, dropoff: S.dropoff, stops: S.stops });
   try {
     S.estimate = await api.post('/rider/estimate', { pickup: S.pickup, dropoff: S.dropoff, stops: S.stops, promo_code: S.promo || undefined });
@@ -444,7 +508,7 @@ export async function showOptions() {
   if (S.estimate.promo_error) { toast(S.estimate.promo_error, 'error'); S.promo = ''; }
   drawTrip({ pickup: S.pickup, dropoff: S.dropoff, stops: S.stops, route: S.estimate.route });
   renderOptions();
-  fitTo(S.map, [S.pickup, S.dropoff, ...S.stops, ...S.estimate.route.filter((_, i) => i % 5 === 0)], sheet);
+  fitTo(S.map, [S.pickup, S.dropoff, ...S.stops, ...S.estimate.route.filter((_, i) => i % 5 === 0)], sheetBox);
 }
 
 function renderOptions() {
@@ -460,8 +524,9 @@ function renderOptions() {
   },
   h('span', { class: 'ro-icon' }, vehicleArt(o.icon)),
   h('span', { class: 'ro-body' },
-    h('div', { class: 'row gap-sm' }, h('span', { class: 'ro-name' }, o.name), o.seats ? h('span', { class: 'muted small row gap-sm' }, icon('user'), fa.num(o.seats)) : null),
-    h('div', { class: 'muted small' }, o.eta_min != null ? `${fa.minutes(o.eta_min)} تا رسیدن • ${o.description}` : 'فعلاً راننده‌ای در دسترس نیست')),
+    h('div', { class: 'row gap-sm' }, h('span', { class: 'ro-name' }, o.name, o.type === 'black' ? h('span', { class: 'ro-tag' }, 'لوکس') : null), o.seats ? h('span', { class: 'muted small row gap-sm' }, icon('user'), fa.num(o.seats)) : null),
+    h('div', { class: 'muted small' }, S.scheduledAt ? `${o.description} • قیمت قطعی رزرو`
+      : o.eta_min != null ? `${fa.minutes(o.eta_min)} تا رسیدن • ${o.description}` : 'فعلاً راننده‌ای در دسترس نیست')),
   h('span', { class: 'ro-price' }, o.discount ? h('s', {}, fa.toman(o.fare)) : null, fa.toman(o.payable))));
 
   const deliveryFields = sel?.is_delivery ? h('div', { class: 'card mt' },
@@ -482,13 +547,15 @@ function renderOptions() {
       h('div', { class: 'grow' },
         h('div', { class: 'bold' }, 'انتخاب سرویس'),
         h('div', { class: 'muted small' }, `${fa.km(est.distance_km)} • حدود ${fa.minutes(est.duration_min)}`))),
-    est.surge > 1 ? h('div', { class: 'surge-banner mt' }, icon('fire'), `تقاضا بالاست؛ ضریب کرایه ×${fa.num(est.surge)}`) : null,
+    S.scheduledAt ? h('div', { class: 'schedule-banner mt' }, icon('calendar'), `رزرو برای ${fa.jWeekday(S.scheduledAt)} ${fa.jDateShort(S.scheduledAt)}، ساعت ${fa.jTime(S.scheduledAt)}`,
+      h('button', { onclick: () => pickSchedule(showOptions) }, 'تغییر')) : null,
+    !S.scheduledAt && est.surge > 1 ? h('div', { class: 'surge-banner mt' }, icon('fire'), `تقاضا بالاست؛ ضریب کرایه ×${fa.num(est.surge)}`) : null,
     h('div', { class: 'list mt' }, options),
     deliveryFields,
     h('div', { class: 'list mt' },
       settingRow(S.payment === 'wallet' ? 'wallet' : 'cash', 'روش پرداخت', S.payment === 'wallet' ? `کیف پول (موجودی ${fa.toman(balance)})` : 'پرداخت نقدی به راننده', pickPayment),
       settingRow('tag', 'کد تخفیف', S.promo || 'افزودن کد تخفیف', pickPromo),
-      settingRow('clock', 'زمان سفر', S.scheduledAt ? fa.jDateTime(S.scheduledAt) : 'همین حالا', () => pickSchedule(renderOptions)),
+      settingRow('clock', 'زمان سفر', S.scheduledAt ? fa.jDateTime(S.scheduledAt) : 'همین حالا', () => pickSchedule(showOptions)),
       settingRow('note', 'یادداشت برای راننده', S.notes || 'مثلاً: جلوی در شماره ۲', pickNotes)),
     reqBtn);
 }
@@ -543,40 +610,61 @@ function pickNotes() {
   });
 }
 
+// Reservation time: a strip of days and a grid of 15-minute slots (Tehran time).
 function pickSchedule(after) {
+  const DAY = 86400000;
+  const minLead = (S.cfg.reserve_min_minutes || 30) * 60000;
+  const maxDays = Math.min(S.cfg.reserve_max_days || 30, 30);
+  const tehranMidnight = (offsetDays) => {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now() + offsetDays * DAY);
+    return Date.parse(`${parts}T00:00:00+03:30`);
+  };
+  const earliest = Date.now() + minLead;
+  let day = 0;
+  let pick = S.scheduledAt;
+  if (pick) day = Math.max(0, Math.floor((pick - tehranMidnight(0)) / DAY));
+  if (tehranMidnight(0) + DAY - 15 * 60000 < earliest) day = Math.max(day, 1); // nothing left today
+
   modal((close) => {
-    const days = h('select', { class: 'input' });
-    const DAY = 86400000;
-    for (let i = 0; i < 7; i++) {
-      const t = Date.now() + i * DAY;
-      days.append(h('option', { value: i }, i === 0 ? 'امروز' : i === 1 ? 'فردا' : `${fa.jWeekday(t)} ${fa.jDateShort(t)}`));
-    }
-    const times = h('select', { class: 'input' });
-    for (let m = 0; m < 24 * 60; m += 15) {
-      times.append(h('option', { value: m }, fa.faDigits(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`)));
-    }
-    // Tehran local midnight for a day offset.
-    const tehranMidnight = (offsetDays) => {
-      const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now() + offsetDays * DAY);
-      return Date.parse(`${parts}T00:00:00+03:30`);
+    const strip = h('div', { class: 'date-strip' });
+    const grid = h('div', { class: 'time-grid' });
+    const summary = h('div', { class: 'schedule-banner mt' });
+    const confirm = h('button', { class: 'btn btn-primary btn-lg btn-block mt' }, 'تأیید زمان سوار شدن');
+
+    const dayFmt = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', day: 'numeric' });
+    const monFmt = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', month: 'short' });
+    const drawDays = () => mount(strip, Array.from({ length: maxDays }, (_, i) => {
+      const t = tehranMidnight(i) + 12 * 3600e3;
+      return h('button', { class: `date-chip ${i === day ? 'active' : ''}`, onclick: () => { day = i; pick = null; drawDays(); drawTimes(); } },
+        h('div', { class: 'dc-w' }, i === 0 ? 'امروز' : i === 1 ? 'فردا' : fa.jWeekday(t)), h('div', { class: 'dc-d' }, dayFmt.format(t)), h('div', { class: 'dc-m' }, monFmt.format(t)));
+    }));
+    const drawTimes = () => {
+      const base = tehranMidnight(day);
+      const slots = [];
+      for (let m = 0; m < 1440; m += 15) {
+        const t = base + m * 60000;
+        if (t < earliest) continue;
+        slots.push(h('button', { class: `time-chip ${pick === t ? 'active' : ''}`, onclick: () => { pick = t; drawTimes(); } }, fa.jTime(t)));
+      }
+      mount(grid, slots.length ? slots : h('div', { class: 'empty', style: { gridColumn: '1 / -1' } }, 'برای امروز زمانی باقی نمانده است'));
+      mount(summary, icon('calendar'), pick ? `سوار شدن: ${fa.jWeekday(pick)} ${fa.jDateShort(pick)}، ساعت ${fa.jTime(pick)}` : 'ساعت سوار شدن را انتخاب کنید');
+      confirm.disabled = !pick;
+      grid.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
     };
-    const nowMin = Math.ceil(((Date.now() - tehranMidnight(0)) / 60000 + 30) / 15) * 15;
-    times.value = String(Math.min(nowMin, 24 * 60 - 15));
+    confirm.onclick = () => { S.scheduledAt = pick; close(); after?.(); };
+    drawDays();
+    drawTimes();
+    setTimeout(() => strip.querySelector('.active')?.scrollIntoView({ inline: 'center', block: 'nearest' }), 50);
     return h('div', {},
       h('h3', {}, 'رزرو سفر'),
-      h('p', { class: 'muted small' }, 'راننده از ۱۰ دقیقه قبل از زمان انتخابی برای شما جستجو می‌شود.'),
-      h('div', { class: 'row mt' }, h('div', { class: 'field grow' }, h('label', {}, 'روز'), days), h('div', { class: 'field grow' }, h('label', {}, 'ساعت'), times)),
-      h('button', {
-        class: 'btn btn-primary btn-lg btn-block',
-        onclick: () => {
-          const t = tehranMidnight(Number(days.value)) + Number(times.value) * 60000;
-          if (t < Date.now() + 15 * 60000) return toast('زمان رزرو باید حداقل ۱۵ دقیقه بعد باشد', 'error');
-          S.scheduledAt = t;
-          close();
-          after?.();
-        },
-      }, 'تأیید زمان'),
-      S.scheduledAt ? h('button', { class: 'btn btn-ghost btn-block mt', onclick: () => { S.scheduledAt = null; close(); after?.(); } }, 'همین حالا') : null);
+      h('p', { class: 'muted small' }, `تا ${fa.num(maxDays)} روز آینده، حداقل ${fa.num(S.cfg.reserve_min_minutes || 30)} دقیقه قبل.`),
+      strip, grid, summary,
+      h('div', { class: 'policy' },
+        h('div', {}, icon('money'), 'کرایه همین حالا قطعی می‌شود و تغییر نمی‌کند (بدون ضریب تقاضای لحظه‌ای).'),
+        h('div', {}, icon('car'), 'یک راننده رزرو را از قبل می‌پذیرد و مشخصاتش را برایتان می‌فرستیم.'),
+        h('div', {}, icon('close'), `لغو رایگان تا ${fa.num(S.cfg.reserve_free_cancel_minutes || 60)} دقیقه قبل از زمان سفر.`)),
+      confirm,
+      S.scheduledAt ? h('button', { class: 'btn btn-ghost btn-block mt', onclick: () => { S.scheduledAt = null; close(); after?.(); } }, 'همین حالا سفر می‌کنم') : null);
   });
 }
 
@@ -589,12 +677,47 @@ async function requestRide() {
   S.promo = '';
   S.notes = '';
   if (ride.status === 'scheduled') {
-    toast(`سفر برای ${fa.jDateTime(ride.scheduled_at)} رزرو شد`, 'success');
     S.scheduledAt = null;
-    showHome();
+    showReserved(ride);
     return;
   }
   setRide(ride);
+}
+
+// Confirmation after booking a ride in advance.
+function showReserved(ride) {
+  enter('reserved');
+  S.upcoming = [...S.upcoming.filter((r) => r.id !== ride.id), ride].sort((a, b) => a.scheduled_at - b.scheduled_at);
+  mount(sheet,
+    h('div', { class: 'success-check' }, icon('check')),
+    h('h2', { class: 'center' }, 'سفر شما رزرو شد'),
+    h('p', { class: 'center muted' }, `${fa.jWeekday(ride.scheduled_at)} ${fa.jDateShort(ride.scheduled_at)}، ساعت ${fa.jTime(ride.scheduled_at)}`),
+    h('div', { class: 'card mt' },
+      h('div', { class: 'list' },
+        listItem({ iconName: 'dot', title: ride.pickup.address || 'مبدأ', sub: 'مبدأ' }),
+        listItem({ iconName: 'pin', title: ride.dropoff.address || 'مقصد', sub: 'مقصد' })),
+      h('div', { class: 'kv total' }, h('span', {}, ride.type_name), h('span', {}, fa.toman(ride.payable)))),
+    h('div', { class: 'policy' },
+      h('div', {}, icon('car'), 'به محض پذیرش رزرو توسط یک راننده، مشخصات او را برایتان می‌فرستیم.'),
+      h('div', {}, icon('bell'), 'یک ساعت قبل یادآوری می‌کنیم و راننده کمی زودتر به سمت شما حرکت می‌کند.'),
+      h('div', {}, icon('close'), `لغو رایگان تا ${fa.jTime(ride.free_cancel_until)} (${fa.num(S.cfg.reserve_free_cancel_minutes || 60)} دقیقه قبل).`)),
+    pushPrompt('از پذیرش راننده و زمان حرکت باخبر شوید، حتی وقتی اپ بسته است.'),
+    h('button', { class: 'btn btn-primary btn-lg btn-block mt', onclick: showHome }, 'بازگشت به خانه'),
+    h('button', { class: 'btn btn-ghost btn-block mt', onclick: () => openScheduled(ctx) }, 'سفرهای رزروشده'));
+}
+
+// Inline card offering push notifications; renders nothing when already on or unsupported.
+function pushPrompt(text) {
+  const box = h('div', {});
+  pushState().then((state) => {
+    if (!['off', 'ios-install'].includes(state)) return;
+    const btn = h('button', { class: 'btn btn-sm btn-accent' }, 'فعال‌سازی');
+    btn.onclick = () => busy(btn, async () => { await enablePush(api); box.replaceChildren(); toast('اعلان‌ها فعال شد', 'success'); });
+    mount(box, h('div', { class: 'notice-card' }, h('span', { class: 'nc-ic' }, icon('bell')),
+      h('div', { class: 'nc-body' }, h('b', {}, 'اعلان‌ها را روشن کنید'), state === 'ios-install' ? 'در آیفون ابتدا نِنا را به صفحه اصلی اضافه کنید (اشتراک ← Add to Home Screen).' : text),
+      state === 'off' ? btn : null));
+  }).catch(() => {});
+  return box;
 }
 
 // ---------------------------------------------------------------------------
@@ -604,7 +727,7 @@ export function setRide(ride) {
   if (!ride) return showHome();
   S.ride = ride;
   switch (ride.status) {
-    case 'scheduled': return showHome();
+    case 'scheduled': S.ride = null; reloadUpcoming(); return S.view === 'reserved' ? undefined : showHome();
     case 'searching': return showSearching();
     case 'no_driver': return showNoDriver();
     case 'accepted': case 'arrived': case 'in_progress': return showTrip();
@@ -616,7 +739,7 @@ export function setRide(ride) {
 
 function showSearching() {
   const r = S.ride;
-  S.view = 'searching';
+  enter('searching');
   setCenterPin(false);
   drawTrip(r);
   moveTo(S.map, r.pickup, 16);
@@ -625,6 +748,7 @@ function showSearching() {
     h('h3', { class: 'center' }, 'در حال یافتن نزدیک‌ترین راننده'),
     h('p', { class: 'center muted small' }, `${r.type_name} • ${fa.toman(r.payable)}`),
     h('div', { class: 'progress-bar mt' }, h('i')),
+    pushPrompt('وقتی راننده پیدا شد یا رسید خبرتان می‌کنیم، حتی اگر صفحه را ببندید.'),
     h('div', { class: 'list mt' },
       listItem({ iconName: 'dot', title: r.pickup.address || 'مبدأ', sub: 'مبدأ' }),
       listItem({ iconName: 'pin', title: r.dropoff.address || 'مقصد', sub: 'مقصد' })),
@@ -633,7 +757,7 @@ function showSearching() {
 
 function showNoDriver() {
   const r = S.ride;
-  S.view = 'no_driver';
+  enter('no_driver');
   mount(sheet,
     h('div', { class: 'empty' }, icon('car'), h('h3', {}, 'راننده‌ای پیدا نشد'), h('p', {}, 'همه رانندگان اطراف مشغول هستند. چند لحظه دیگر دوباره تلاش کنید یا سرویس دیگری انتخاب کنید.')),
     h('button', { class: 'btn btn-primary btn-lg btn-block', onclick: (e) => busy(e.currentTarget, async () => setRide((await api.post(`/rider/rides/${r.id}/retry`)).ride)) }, 'تلاش دوباره'),
@@ -653,7 +777,7 @@ function tripStatus(r) {
 
 function showTrip() {
   const r = S.ride;
-  S.view = 'trip';
+  enter('trip');
   setCenterPin(false);
   drawTrip(r);
   const d = r.driver;
@@ -661,16 +785,20 @@ function showTrip() {
     layers.driver = L.marker([d.lat, d.lng], { icon: carIcon(d.vehicle_type, d.heading), zIndexOffset: 1000 }).addTo(S.map);
   }
   const focus = r.status === 'in_progress' ? [d, r.dropoff] : r.status === 'arrived' ? [r.pickup] : [d, r.pickup];
-  fitTo(S.map, focus.filter((p) => p?.lat != null), sheet);
+  fitTo(S.map, focus.filter((p) => p?.lat != null), sheetBox);
 
   const st = tripStatus(r);
   const canCancel = ['accepted', 'arrived'].includes(r.status);
   const action = (ic, label, onclick, { danger, href, badge } = {}) => h(href ? 'a' : 'button', { class: `action ${danger ? 'danger' : ''}`, onclick, href },
     h('span', { class: 'a-ic', style: { position: 'relative' } }, icon(ic), badge ? h('span', { class: 'badge red', style: { position: 'absolute', top: '-4px', left: '-4px' } }, fa.num(badge)) : null), label);
 
+  const stage = { accepted: 0, arrived: 1, in_progress: 2 }[r.status];
   mount(sheet,
-    h('div', { class: 'status-line' }, st.title),
-    h('div', { class: 'muted small' }, st.sub),
+    h('div', { class: 'steps' }, [0, 1, 2].map((i) => h('i', { class: i < stage ? 'done' : i === stage ? 'now' : '' }))),
+    r.status === 'accepted' && d?.eta_min
+      ? h('div', { class: 'eta-big' }, h('b', {}, fa.num(d.eta_min, 0)), h('span', { class: 'bold' }, 'دقیقه تا رسیدن راننده'))
+      : h('div', { class: 'status-line' }, st.title),
+    h('div', { class: 'muted small' }, r.status === 'accepted' && d?.eta_min ? st.sub : st.sub),
     r.require_pin && r.status !== 'in_progress' ? h('div', { class: 'pin-box mt' }, h('span', {}, 'کد سفر را به راننده بگویید'), h('span', { class: 'pin' }, fa.faDigits(r.pin))) : null,
     h('div', { class: 'divider' }),
     d ? h('div', { class: 'driver-card' },
@@ -751,7 +879,7 @@ const GOOD_TAGS = ['رانندگی ایمن', 'خوش‌برخورد', 'خودر
 const BAD_TAGS = ['رانندگی پرخطر', 'تأخیر در رسیدن', 'خودروی نامرتب', 'برخورد نامناسب', 'مسیر طولانی', 'درخواست کرایه بیشتر'];
 
 export function showRating(ride) {
-  S.view = 'rating';
+  enter('rating');
   S.ride = null;
   setCenterPin(false);
   clearRoute();

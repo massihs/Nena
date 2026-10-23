@@ -4,6 +4,8 @@ import { bbox, haversineKm, etaMinutes } from './geo.js';
 import { emitTo } from '../realtime.js';
 
 const STALE_MS = 90 * 1000;
+// Drivers with a reservation starting soon get no new on-demand requests.
+const RESERVE_HOLD_MS = 45 * 60 * 1000;
 export const ALL_VEHICLES = ['eco', 'black', 'plus', 'van', 'bike'];
 
 export function getDriver(userId) {
@@ -44,8 +46,9 @@ function nearbyRows(lat, lng, radiusKm, vehicleTypes, excludeIds = []) {
       WHERE d.online = 1 AND d.status = 'approved' AND u.blocked = 0 AND d.current_ride_id IS NULL
       AND d.last_seen > ? AND d.lat BETWEEN ? AND ? AND d.lng BETWEEN ? AND ?
       AND d.vehicle_type IN (${types.map(() => '?').join(',')})
-      AND d.user_id NOT IN (SELECT offered_driver_id FROM rides WHERE status = 'searching' AND offered_driver_id IS NOT NULL)`)
-    .all(now() - STALE_MS, b.minLat, b.maxLat, b.minLng, b.maxLng, ...types)
+      AND d.user_id NOT IN (SELECT offered_driver_id FROM rides WHERE status = 'searching' AND offered_driver_id IS NOT NULL)
+      AND d.user_id NOT IN (SELECT reserved_driver_id FROM rides WHERE status = 'scheduled' AND reserved_driver_id IS NOT NULL AND scheduled_at < ?)`)
+    .all(now() - STALE_MS, b.minLat, b.maxLat, b.minLng, b.maxLng, ...types, now() + RESERVE_HOLD_MS)
     .filter((d) => !excludeIds.includes(d.user_id))
     .map((d) => ({ ...d, distance_km: haversineKm({ lat, lng }, d) }))
     .filter((d) => d.distance_km <= radiusKm)
